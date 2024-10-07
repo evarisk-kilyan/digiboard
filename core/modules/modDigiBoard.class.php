@@ -117,7 +117,9 @@ class modDigiBoard extends DolibarrModules
             // Set this to relative path of js file if module must load a js on all pages
             'js' => [],
             // Set here all hooks context managed by module. To find available hook context, make a "grep -r '>initHooks(' *" on source code. You can also set hook context to 'all'
-            'hooks' => [],
+            'hooks' => [
+                'digiboardindex'
+            ],
             // Set this to 1 if features of module are opened to external users
             'moduleforexternal' => 0
         ];
@@ -218,7 +220,21 @@ class modDigiBoard extends DolibarrModules
         $r          = 0;
 
         // Add here entries to declare new menus
-        $this->menu[$r++] = [];
+        $this->menu[$r++] = [
+            'fk_menu'  => 'fk_mainmenu=digiriskdolibarr',
+            'type'     => 'left',
+            'titre'    => $langs->transnoentities('DigiBoard'),
+            'prefix'   => '<i class="fas fa-chart-bar pictofixedwidth"></i>',
+            'mainmenu' => 'digiriskdolibarr',
+            'leftmenu' => 'digiboardconfig',
+            'url'      => '/digiboard/digiboardindex.php',
+            'langs'    => 'digiboard@digiboard',
+            'position' => 10 + $r,
+            'enabled'  => '$conf->digiboard->enabled && $conf->digiriskdolibarr->enabled',
+            'perms'    => '$user->rights->digiboard->read && $user->rights->digiriskdolibarr->read ',
+            'target'   => '',
+            'user'     => 0,
+        ];
     }
 
     /**
@@ -241,6 +257,34 @@ class modDigiBoard extends DolibarrModules
 
         dolibarr_set_const($this->db, 'DIGIBOARD_VERSION', $this->version, 'chaine', 0, '', $conf->entity);
         dolibarr_set_const($this->db, 'DIGIBOARD_DB_VERSION', $this->version, 'chaine', 0, '', $conf->entity);
+
+        $params = [
+            'digiboard' => [                                                                                          // nom informatif du module externe qui apporte ses paramètres
+                'sharingelements' => [                                                                                // section des paramètres 'element' et 'object'
+                    'digiriskstats' => [                                                                              // Valeur utilisée dans getEntity()
+                        'type'    => 'element',                                                                       // element: partage d'éléments principaux (thirdparty, product, member, etc...)
+                        'icon'    => 'chart-bar',                                                                     // Font Awesome icon
+                        'lang'    => 'digiboard@digiboard',                                                           // Fichier de langue contenant les traductions
+                        'tooltip' => 'DigiriskStatsSharedTooltip',                                                    // Message Tooltip (ne pas mettre cette clé si pas de tooltip)
+                        'enable'  => '!empty($conf->digiboard->enabled) && !empty($conf->digiriskdolibarr->enabled)', // Conditions d'activation du partage
+                        'input'   => [                                                                                // input : Paramétrage de la réaction du bouton on/off
+                            'global' => [                                                                             // global : réaction lorsqu'on désactive l'option de partage global
+                                'showhide' => true,                                                                   // showhide : afficher/cacher le bloc de partage lors de l'activation/désactivation du partage global
+                                'hide'     => true,                                                                   // hide : cache le bloc de partage lors de la désactivation du partage global
+                                'del'      => true                                                                    // del : suppression de la constante du partage lors de la désactivation du partage global
+                            ]
+                        ]
+                    ]
+                ],
+                'sharingmodulename' => [ // correspondance des noms de modules pour le lien parent ou compatibilité (ex: 'productsupplierprice'	=> 'product')
+                    'digiriskstats' => 'digiboard',
+                ]
+            ]
+        ];
+
+        $externalModule = json_decode(getDolGlobalString('MULTICOMPANY_EXTERNAL_MODULES_SHARING'), true);
+        $externalModule = !empty(getDolGlobalString('MULTICOMPANY_EXTERNAL_MODULES_SHARING')) ? array_merge($externalModule, $params) : $params;
+        dolibarr_set_const($this->db, 'MULTICOMPANY_EXTERNAL_MODULES_SHARING', json_encode($externalModule), 'json', 0, '', 0);
 
         return $this->_init($sql, $options);
     }
