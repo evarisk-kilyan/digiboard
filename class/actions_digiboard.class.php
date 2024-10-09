@@ -82,4 +82,20 @@ class ActionsDigiboard
 
         return 0; // or return 1 to replace standard code
     }
+
+    /**
+     * Overloading the printUserListWhere function : replacing the parent's function with the one below
+     *
+     * @param  array $parameters Hook metadata (context, etc...)
+     * @return int               0 < on error, 0 on success, 1 to replace standard code
+     */
+    public function printUserListWhere(array $parameters): int
+    {
+        if (strpos($parameters['context'], 'digiboardindex') !== false) {
+            $this->resprints = ' WHERE 1 = 1';
+            return 1;
+        }
+
+        return 0; // or return 1 to replace standard code
+    }
 }
