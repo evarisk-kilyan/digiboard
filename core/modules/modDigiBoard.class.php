@@ -162,10 +162,13 @@ class modDigiBoard extends DolibarrModules
         // );
         $i = 0;
         $this->const = [
+            // CONST CONFIGURATION
+            $i++ => ['DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT', 'integer', 0, '', 0, 'current'],
+
             // CONST MODULE
             $i++ => ['DIGIBOARD_VERSION', 'chaine', $this->version, '', 0, 'current'],
             $i++ => ['DIGIBOARD_DB_VERSION', 'chaine', $this->version, '', 0, 'current'],
-            $i   => ['DIGIBOARD_SHOW_PATCH_NOTE', 'integer', 1, '', 0, 'current']
+            $i   => ['DIGIBOARD_SHOW_PATCH_NOTE', 'integer', 1, '', 0, 'current'],
         ];
 
         // Some keys to add into the overwriting translation tables

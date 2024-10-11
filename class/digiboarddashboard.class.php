@@ -75,7 +75,10 @@ class DigiboardDashboard
 
         // Graph parameters
         $array['type']   = 'list';
-        $array['labels'] = ['Site', 'Siret', 'RiskAssessmentDocument', 'DelayGenerateDate', 'NbEmployees', 'NbEmployeesInvolved', 'GreyRisk', 'OrangeRisk', 'RedRisk', 'BlackRisk', 'NbPresquAccidents', 'NbAccidents', 'NbAccidentsByEmployees', 'NbAccidentInvestigations', 'WorkStopDays', 'FrequencyIndex', 'FrequencyRate', 'GravityRate'];
+        $array['labels'] = ['Site', 'Siret', 'RiskAssessmentDocument', 'DelayGenerateDate', 'NbEmployees', 'NbEmployeesInvolved', 'GreyRisk', 'OrangeRisk', 'RedRisk', 'BlackRisk'];
+        if (getDolGlobalInt('DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT') > 0) {
+            $array['labels'][] = ['NbPresquAccidents', 'NbAccidents', 'NbAccidentsByEmployees', 'NbAccidentInvestigations', 'WorkStopDays', 'FrequencyIndex', 'FrequencyRate', 'GravityRate'];
+        }
 
         require_once __DIR__ . '/../../digiriskdolibarr/class/digiriskdolibarrdocuments/riskassessmentdocument.class.php';
         require_once __DIR__ . '/../../digiriskdolibarr/class/evaluator.class.php';
@@ -91,64 +94,71 @@ class DigiboardDashboard
 
         $riskAssessmentDocument->ismultientitymanaged = 0;
         $accident->ismultientitymanaged               = 0;
+        $evaluator->ismultientitymanaged              = 0;
 
         $arrayDigiRiskStatsList = [];
-        $entities               = [];
         $filter                 = '';
         $riskAssessmentCotation = [1 => 'GreyRisk', 2 => 'OrangeRisk', 3 => 'RedRisk', 4 => 'BlackRisk'];
         $sharingEntities        = $mc->sharings['digiriskstats'];
+        $entities               = $mc->getEntitiesList(false, false, true);
         if (!empty($sharingEntities)) {
             $currentEntity[]           = 1;
             $sharingEntitiesAndCurrent = array_unique(array_merge($currentEntity, $sharingEntities));
-            $entities                  = $mc->getEntitiesList(false, false, true);
             $filter                    = $digiriskElement->getTrashExclusionSqlFilter();
         }
-        if (!empty($sharingEntitiesAndCurrent)) {
-            foreach ($sharingEntitiesAndCurrent as $key => $sharingEntity) {
-                $arrayDigiRiskStatsList[$key]['Site']['value']   = $entities[$sharingEntity];
-                $arrayDigiRiskStatsList[$key]['Site']['morecss'] = 'left bold';
-                $arrayDigiRiskStatsList[$key]['Siret']['value']  = dolibarr_get_const($db, 'MAIN_INFO_SIRET', $sharingEntity);
+        if (!empty($entities)) {
+            foreach ($entities as $entityID => $entityName) {
+                if (!empty($sharingEntitiesAndCurrent) && !in_array($entityID, $sharingEntitiesAndCurrent)) {
+                    continue;
+                }
 
-                $moreParam['entity']                                             = $sharingEntity;
-                $filterEntity                                                    = ' AND t.entity = ' . $sharingEntity;
-                $moreParam['filter']                                             = $filterEntity;
-                $arrayGetGenerationDateInfos                                     = $riskAssessmentDocument->getGenerationDateInfos($moreParam);
-                $arrayDigiRiskStatsList[$key]['RiskAssessmentDocument']['value'] = $arrayGetGenerationDateInfos['lastgeneratedate'] . $arrayGetGenerationDateInfos['moreContent'];
-                $arrayDigiRiskStatsList[$key]['DelayGenerateDate']['value']      = $arrayGetGenerationDateInfos['delaygeneratedate'];
+                $arrayDigiRiskStatsList[$entityID]['Site']['value']   = $entityName;
+                $arrayDigiRiskStatsList[$entityID]['Site']['morecss'] = 'left bold';
+                $arrayDigiRiskStatsList[$entityID]['Siret']['value']  = dolibarr_get_const($db, 'MAIN_INFO_SIRET', $entityID);
 
-                $moreParam['filter']                                          = ' AND u.entity IN (0,' . $sharingEntity . ')';
-                $employees                                                    = $evaluator->getNbEmployees($moreParam);
-                $arrayDigiRiskStatsList[$key]['NbEmployees']['value']         = $employees['nbemployees'];
-                $arrayDigiRiskStatsList[$key]['NbEmployeesInvolved']['value'] = $evaluator->getNbEmployeesInvolved($moreParam)['nbemployeesinvolved'];
+                $moreParam['entity']                                                  = $entityID;
+                $filterEntity                                                         = ' AND t.entity = ' . $entityID;
+                $moreParam['filter']                                                  = $filterEntity;
+                $arrayGetGenerationDateInfos                                          = $riskAssessmentDocument->getGenerationDateInfos($moreParam);
+                $arrayDigiRiskStatsList[$entityID]['RiskAssessmentDocument']['value'] = $arrayGetGenerationDateInfos['lastgeneratedate'] . $arrayGetGenerationDateInfos['moreContent'];
+                $arrayDigiRiskStatsList[$entityID]['DelayGenerateDate']['value']      = $arrayGetGenerationDateInfos['delaygeneratedate'];
+
+                $moreParam['filter']                                               = ' AND u.entity IN (0,' . $entityID . ')';
+                $employees                                                         = $evaluator->getNbEmployees($moreParam);
+                $moreParam['filter']                                               = 't.entity = ' . $entityID;
+                $arrayDigiRiskStatsList[$entityID]['NbEmployees']['value']         = $employees['nbemployees'];
+                $arrayDigiRiskStatsList[$entityID]['NbEmployeesInvolved']['value'] = $evaluator->getNbEmployeesInvolved($moreParam)['nbemployeesinvolved'];
 
                 $moreParam['filter']                = $filter . $filterEntity;
                 $moreParam['multiEntityManagement'] = false;
                 $getRisksByCotation = $risk->getRisksByCotation($moreParam)['data'];
                 for ($i = 1; $i <= 4; $i++) {
-                    $arrayDigiRiskStatsList[$key][$riskAssessmentCotation[$i]]['value']    = $getRisksByCotation[$i];
-                    $arrayDigiRiskStatsList[$key][$riskAssessmentCotation[$i]]['morecss']  = 'risk-evaluation-cotation';
-                    $arrayDigiRiskStatsList[$key][$riskAssessmentCotation[$i]]['moreAttr'] = 'data-scale=' . $i . ' style="line-height: 0; border-radius: 0;"';
+                    $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['value']    = $getRisksByCotation[$i];
+                    $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['morecss']  = 'risk-evaluation-cotation';
+                    $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['moreAttr'] = 'data-scale=' . $i . ' style="line-height: 0; border-radius: 0;"';
                 }
 
-                $moreParam['filter']    = $filterEntity;
-                $join                   = ' LEFT JOIN ' . MAIN_DB_PREFIX . $accident->table_element . ' as a ON a.rowid = t.fk_accident';
-                $accidentsWithWorkStops = saturne_fetch_all_object_type('AccidentWorkStop', 'DESC', 't.rowid', 0, 0, ['customsql' => 't.entity = ' . $sharingEntity], 'AND', false, false, false, $join);
-                $accidents              = $accident->fetchAll('', '', 0, 0, ['customsql' => ' t.status > ' . Accident::STATUS_DRAFT . $moreParam['filter']]);
-                if (empty($accidents) && !is_array($accidents)) {
-                    $accidents = [];
-                }
-                if (empty($accidentsWithWorkStops) && !is_array($accidentsWithWorkStops)) {
-                    $accidentsWithWorkStops = [];
-                }
+                if (getDolGlobalInt('DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT') > 0) {
+                    $moreParam['filter']    = $filterEntity;
+                    $join                   = ' LEFT JOIN ' . MAIN_DB_PREFIX . $accident->table_element . ' as a ON a.rowid = t.fk_accident';
+                    $accidentsWithWorkStops = saturne_fetch_all_object_type('AccidentWorkStop', 'DESC', 't.rowid', 0, 0, ['customsql' => 't.entity = ' . $entityID], 'AND', false, false, false, $join);
+                    $accidents              = $accident->fetchAll('', '', 0, 0, ['customsql' => ' t.status > ' . Accident::STATUS_DRAFT . $moreParam['filter']]);
+                    if (empty($accidents) && !is_array($accidents)) {
+                        $accidents = [];
+                    }
+                    if (empty($accidentsWithWorkStops) && !is_array($accidentsWithWorkStops)) {
+                        $accidentsWithWorkStops = [];
+                    }
 
-                $arrayDigiRiskStatsList[$key]['NbPresquAccidents']['value']        = $accident->getNbPresquAccidents()['nbpresquaccidents'];
-                $arrayDigiRiskStatsList[$key]['NbAccidents']['value']              = $accident->getNbAccidents($accidents, $accidentsWithWorkStops)['data']['accidents'];
-                $arrayDigiRiskStatsList[$key]['NbAccidentsByEmployees']['value']   = $accident->getNbAccidentsByEmployees($accidents, $accidentsWithWorkStops, $employees)['nbaccidentsbyemployees'];
-                $arrayDigiRiskStatsList[$key]['NbAccidentInvestigations']['value'] = $accident->getNbAccidentInvestigations($moreParam)['nbaccidentinvestigations'];
-                $arrayDigiRiskStatsList[$key]['WorkStopDays']['value']             = $accident->getNbWorkstopDays($accidentsWithWorkStops)['nbworkstopdays'];
-                $arrayDigiRiskStatsList[$key]['FrequencyIndex']['value']           = $accident->getFrequencyIndex($accidentsWithWorkStops, $employees)['frequencyindex'];
-                $arrayDigiRiskStatsList[$key]['FrequencyRate']['value']            = $accident->getFrequencyRate($employees)['frequencyrate'];
-                $arrayDigiRiskStatsList[$key]['GravityRate']['value']              = $accident->getGravityRate($employees)['gravityrate'];
+                    $arrayDigiRiskStatsList[$entityID]['NbPresquAccidents']['value']        = $accident->getNbPresquAccidents()['nbpresquaccidents'];
+                    $arrayDigiRiskStatsList[$entityID]['NbAccidents']['value']              = $accident->getNbAccidents($accidents, $accidentsWithWorkStops)['data']['accidents'];
+                    $arrayDigiRiskStatsList[$entityID]['NbAccidentsByEmployees']['value']   = $accident->getNbAccidentsByEmployees($accidents, $accidentsWithWorkStops, $employees)['nbaccidentsbyemployees'];
+                    $arrayDigiRiskStatsList[$entityID]['NbAccidentInvestigations']['value'] = $accident->getNbAccidentInvestigations($moreParam)['nbaccidentinvestigations'];
+                    $arrayDigiRiskStatsList[$entityID]['WorkStopDays']['value']             = $accident->getNbWorkstopDays($accidentsWithWorkStops)['nbworkstopdays'];
+                    $arrayDigiRiskStatsList[$entityID]['FrequencyIndex']['value']           = $accident->getFrequencyIndex($accidentsWithWorkStops, $employees)['frequencyindex'];
+                    $arrayDigiRiskStatsList[$entityID]['FrequencyRate']['value']            = $accident->getFrequencyRate($employees)['frequencyrate'];
+                    $arrayDigiRiskStatsList[$entityID]['GravityRate']['value']              = $accident->getGravityRate($employees)['gravityrate'];
+                }
             }
         }
         $array['data'] = $arrayDigiRiskStatsList;

@@ -24,8 +24,19 @@ DigiBoardDescription     = Tableau de bord pour les applications DigiRisk, DigiQ
 DigiBoardDescriptionLong = Tableau de bord pour les applications DigiRisk, DigiQuali et bien plus ...
 EnableDigiBoard          = Veuillez activer le module DigiBoard pour accéder à cette page
 
+# MultiCompany - MultiCompany
 ShareDigiriskstats              = Activer le partage des statistiques de DigiRisk
 DigiriskStatsSharedTooltip      = Partagez vos statistiques avec les autres entités de DigiRisk
 DIGIRISKSTATSSharing            = Partage des statistiques DigiRisk
 DIGIRISKSTATSSharingDescription = Sélection des entités qui partageront leurs statistiques DigiRisk avec cette entité.
 DigiRiskStatsList               = Statistiques DigiRisk
+
+
+
+#
+# Config page - Page d'administration
+#
+
+# Setup - Réglages
+DigiRiskStatsLoadAccident            = Chargement des statistiques d'accidents de DigiRisk
+DigiRiskStatsLoadAccidentDescription = Chargement des statistiques d'accidents de DigiRisk pour les entités partagées
