@@ -63,6 +63,15 @@ print load_fiche_titre($title, $linkBack, 'title_setup');
 $head = digiboard_admin_prepare_head();
 print dol_get_fiche_head($head, 'settings', $title, -1, 'digiboard_color@digiboard');
 
+$constArray['digiboard'] = [
+    'DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT' => [
+        'name'        => 'DigiRiskStatsLoadAccident',
+        'description' => 'DigiRiskStatsLoadAccidentDescription',
+        'code'        => 'DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT',
+    ]
+];
+require __DIR__ . '/../../saturne/core/tpl/admin/object/object_const_view.tpl.php';
+
 // Page end
 print dol_get_fiche_end();
 $db->close();
