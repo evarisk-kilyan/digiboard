@@ -71,11 +71,13 @@ class ActionsDigiboard
     {
         if (strpos($parameters['context'], 'digiboardindex') !== false) {
             $resourcesRequired = [
-                'css' => '/custom/digiriskdolibarr/css/digiriskdolibarr.min.css',
+                'css'        => '/custom/digiriskdolibarr/css/digiriskdolibarr.min.css',
+                'cssSaturne' => '/custom/saturne/css/saturne.min.css',
             ];
 
             $out  = '<!-- Includes CSS added by module digiriskdolibarr -->';
             $out .= '<link rel="stylesheet" type="text/css" href="' . dol_buildpath($resourcesRequired['css'], 1) . '">';
+            $out .= '<link rel="stylesheet" type="text/css" href="' . dol_buildpath($resourcesRequired['cssSaturne'], 1) . '">';
 
             $this->resprints = $out;
         }

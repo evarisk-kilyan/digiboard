@@ -104,9 +104,11 @@ class DigiboardDashboard
         if (!empty($sharingEntities)) {
             $currentEntity[]           = 1;
             $sharingEntitiesAndCurrent = array_unique(array_merge($currentEntity, $sharingEntities));
-            $filter                    = $digiriskElement->getTrashExclusionSqlFilter();
+            $filter                    = 'AND t.fk_element NOT IN' . $digiriskElement->getTrashExclusionSqlFilter();
         }
+
         if (!empty($entities)) {
+            $total = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 'nbEmployees' => 0];
             foreach ($entities as $entityID => $entityName) {
                 if (!empty($sharingEntitiesAndCurrent) && !in_array($entityID, $sharingEntitiesAndCurrent)) {
                     continue;
@@ -128,14 +130,26 @@ class DigiboardDashboard
                 $moreParam['filter']                                               = 't.entity = ' . $entityID;
                 $arrayDigiRiskStatsList[$entityID]['NbEmployees']['value']         = $employees['nbemployees'];
                 $arrayDigiRiskStatsList[$entityID]['NbEmployeesInvolved']['value'] = $evaluator->getNbEmployeesInvolved($moreParam)['nbemployeesinvolved'];
+                $total['nbEmployees'] += $employees['nbemployees'];
 
                 $moreParam['filter']                = $filter . $filterEntity;
                 $moreParam['multiEntityManagement'] = false;
                 $getRisksByCotation = $risk->getRisksByCotation($moreParam)['data'];
                 for ($i = 1; $i <= 4; $i++) {
-                    $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['value']    = $getRisksByCotation[$i];
+                    if ($i == 4) {
+                        $percent                                                                  = $getRisksByCotation[$i] > 0 ? round($getRisksByCotation[$i] * 100 / array_sum($getRisksByCotation), 1) : 0;
+                        $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['value'] .= "
+                            <div class='flex justify-center items-center' style='gap: 0.2em;'>
+                                <span class='width50p right'>$getRisksByCotation[$i]</span>
+                                <span class='width50p left' style='font-size: 0.75em;'>($percent%)</span>
+                            </div>
+                        ";
+                    } else {
+                        $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['value'] = $getRisksByCotation[$i];
+                    }
                     $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['morecss']  = 'risk-evaluation-cotation';
                     $arrayDigiRiskStatsList[$entityID][$riskAssessmentCotation[$i]]['moreAttr'] = 'data-scale=' . $i . ' style="line-height: 0; border-radius: 0;"';
+                    $total[$i]                                                                 += $getRisksByCotation[$i];
                 }
 
                 if (getDolGlobalInt('DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT') > 0) {
@@ -160,6 +174,18 @@ class DigiboardDashboard
                     $arrayDigiRiskStatsList[$entityID]['GravityRate']['value']              = $accident->getGravityRate($employees)['gravityrate'];
                 }
             }
+
+            $totalValue                         = ['Site' => ['value' => $langs->transnoentities('Total'), 'morecss' => 'bold'], 'Siret' => ['value' => ''], 'RiskAssessmentDocument' => ['value' => ''], 'DelayGenerateDate' => ['value' => ''], 'NbEmployees' => ['value' => ''], 'NbEmployeesInvolved' => ['value' => '']];
+            $totalValue['NbEmployees']['value'] = $total['nbEmployees'];
+            for ($i = 1; $i <= 4; $i++) {
+                $totalValue[$riskAssessmentCotation[$i]]['value']    = $total[$i];
+                $totalValue[$riskAssessmentCotation[$i]]['morecss']  = 'risk-evaluation-cotation';
+                $totalValue[$riskAssessmentCotation[$i]]['moreAttr'] = 'data-scale=' . $i . ' style="line-height: 0; border-radius: 0;"';
+            }
+            if (getDolGlobalInt('DIGIBOARD_DIGIRISIK_STATS_LOAD_ACCIDENT')) {
+                $totalValue = array_merge($totalValue, ['NbPresquAccidents' => ['value' => ''], 'NbAccidents' => ['value' => ''], 'NbAccidentsByEmployees' => ['value' => ''], 'NbAccidentInvestigations' => ['value' => ''], 'WorkStopDays' => ['value' => ''], 'FrequencyIndex' => ['value' => ''], 'FrequencyRate' => ['value' => ''], 'GravityRate' => ['value' => '']]);
+            }
+            $arrayDigiRiskStatsList[] = $totalValue;
         }
         $array['data'] = $arrayDigiRiskStatsList;
 
