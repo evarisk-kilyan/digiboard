@@ -31,7 +31,7 @@ if (file_exists(__DIR__ . '/../digiboard.main.inc.php')) {
 }
 
 // Global variables definitions
-global $conf, $db, $hookmanager, $langs, $moduleName, $user;
+global $conf, $db, $hookmanager, $langs, $mc, $moduleName, $mysoc, $user;
 
 // Load translation files required by the page
 saturne_load_langs(['digiboard@digiboard', 'projects']);
@@ -56,8 +56,9 @@ if (empty($conf->digiriskdolibarr->enabled)) {
 }
 
 // Get parameters
-$action          = GETPOST('action', 'aZ09');
-$establishmentId = GETPOSTINT('establishment_id');
+$action       = GETPOST('action', 'aZ09');
+$filterEntity = GETPOSTINT('filter_entity');
+$elementId    = GETPOSTISSET('element_id') ? GETPOSTINT('element_id') : GETPOSTINT('establishment_id');
 $cotationFilter  = GETPOST('cotation_filter', 'alpha');
 if (empty($cotationFilter)) {
     $cotationFilter = 'all';
@@ -79,6 +80,21 @@ if (empty($sortorder)) {
     $sortorder = 'DESC';
 }
 
+// Retrieve accessible entities (establishments)
+$entities = [];
+if (isModEnabled('multicompany') && is_object($mc)) {
+    $entities = $mc->getEntitiesList(true, false, true);
+}
+if (empty($entities)) {
+    $entityName = !empty($conf->global->MAIN_INFO_SOCIETE_NOM) ? $conf->global->MAIN_INFO_SOCIETE_NOM : (!empty($mysoc->name) ? $mysoc->name : 'Société');
+    $entities[(int) $conf->entity] = $entityName;
+}
+
+// Validate selected filter entity
+if ($filterEntity > 0 && !isset($entities[$filterEntity])) {
+    $filterEntity = 0;
+}
+
 // Load Danger Categories from Digirisk JSON file
 $dangerCategories = [];
 $dangerCategoriesFile = DOL_DOCUMENT_ROOT . '/custom/digiriskdolibarr/js/json/dangerCategories.json';
@@ -92,32 +108,43 @@ if (file_exists($dangerCategoriesFile)) {
     }
 }
 
-// Fetch Establishments & Element hierarchy for the current entity
-$establishments   = [];
+// Fetch Groupments & WorkUnits hierarchy for accessible entities
 $elements         = [];
 $elementsByParent = [];
+$groupments       = [];
 
-$sqlElements  = "SELECT rowid, ref, label, fk_parent, element_type";
+$sqlElements  = "SELECT rowid, ref, label, fk_parent, element_type, entity";
 $sqlElements .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement";
-$sqlElements .= " WHERE entity = " . (int) $conf->entity . " AND status = 1";
-$sqlElements .= " ORDER BY label ASC";
+$sqlElements .= " WHERE status = 1";
+if ($filterEntity > 0) {
+    $sqlElements .= " AND entity = " . (int) $filterEntity;
+} else {
+    $sqlElements .= " AND entity IN (" . implode(',', array_map('intval', array_keys($entities))) . ")";
+}
+$sqlElements .= " ORDER BY entity ASC, fk_parent ASC, label ASC";
 
 $resElements = $db->query($sqlElements);
 if ($resElements) {
     while ($elem = $db->fetch_object($resElements)) {
-        $elements[(int) $elem->rowid] = $elem;
-        $elementsByParent[(int) $elem->fk_parent][] = (int) $elem->rowid;
+        $elemId = (int) $elem->rowid;
+        $elements[$elemId] = $elem;
+        $elementsByParent[(int) $elem->fk_parent][] = $elemId;
         if ($elem->element_type === 'groupment') {
-            $establishments[(int) $elem->rowid] = $elem->ref . ' - ' . $elem->label;
+            $groupments[$elemId] = $elem;
         }
     }
     $db->free($resElements);
 }
 
-// Resolve descendant elements when an establishment is selected
+// If an element was selected but belongs to another entity when an entity filter is set, reset it
+if ($filterEntity > 0 && $elementId > 0 && isset($elements[$elementId]) && (int) $elements[$elementId]->entity !== $filterEntity) {
+    $elementId = 0;
+}
+
+// Resolve descendant elements when an element (groupment or workunit) is selected
 $filterElementIds = [];
-if ($establishmentId > 0 && isset($elements[$establishmentId])) {
-    $queue = [$establishmentId];
+if ($elementId > 0 && isset($elements[$elementId])) {
+    $queue = [$elementId];
     while (!empty($queue)) {
         $curr = array_shift($queue);
         $filterElementIds[] = (int) $curr;
@@ -126,6 +153,32 @@ if ($establishmentId > 0 && isset($elements[$establishmentId])) {
                 $queue[] = (int) $childId;
             }
         }
+    }
+}
+
+// Build options list for Groupment & Unit dropdown
+$elementOptions = [0 => '-- ' . $langs->trans('AllGroupmentsAndUnits') . ' --'];
+$showEntityPrefix = ($filterEntity <= 0 && count($entities) > 1);
+
+foreach ($groupments as $gpId => $gp) {
+    $prefix = ($showEntityPrefix && isset($entities[(int) $gp->entity])) ? '[' . $entities[(int) $gp->entity] . '] ' : '';
+    $elementOptions[$gpId] = $prefix . '📁 ' . $gp->ref . ' - ' . $gp->label;
+
+    if (!empty($elementsByParent[$gpId])) {
+        foreach ($elementsByParent[$gpId] as $childId) {
+            if (isset($elements[$childId])) {
+                $child = $elements[$childId];
+                $elementOptions[$childId] = $prefix . '&nbsp;&nbsp;&nbsp;&nbsp;↳ ⚙ ' . $child->ref . ' - ' . $child->label;
+            }
+        }
+    }
+}
+// Any standalone elements (not under a groupment)
+foreach ($elements as $eId => $e) {
+    if (!isset($elementOptions[$eId])) {
+        $prefix = ($showEntityPrefix && isset($entities[(int) $e->entity])) ? '[' . $entities[(int) $e->entity] . '] ' : '';
+        $icon = ($e->element_type === 'groupment') ? '📁 ' : '⚙ ';
+        $elementOptions[$eId] = $prefix . $icon . $e->ref . ' - ' . $e->label;
     }
 }
 
@@ -160,7 +213,13 @@ $sqlCounts .= "     WHERE status = 1";
 $sqlCounts .= "     GROUP BY fk_risk";
 $sqlCounts .= "   ) ra2 ON ra1.rowid = ra2.max_id";
 $sqlCounts .= " ) ra ON ra.fk_risk = r.rowid";
-$sqlCounts .= " WHERE r.status <> -1 AND e.status = 1 AND r.entity = " . (int) $conf->entity . " AND r.type = '" . $db->escape($riskType) . "'";
+$sqlCounts .= " WHERE r.status <> -1 AND e.status = 1 AND r.type = '" . $db->escape($riskType) . "'";
+
+if ($filterEntity > 0) {
+    $sqlCounts .= " AND r.entity = " . (int) $filterEntity;
+} else {
+    $sqlCounts .= " AND r.entity IN (" . implode(',', array_map('intval', array_keys($entities))) . ")";
+}
 
 if (!empty($filterElementIds)) {
     $sqlCounts .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
@@ -181,7 +240,7 @@ if ($resCounts) {
 }
 
 // Build Main Risks Query
-$sql  = "SELECT r.rowid, r.ref, r.description, r.category, r.status, r.type,";
+$sql  = "SELECT r.rowid, r.ref, r.description, r.category, r.status, r.type, r.entity,";
 $sql .= " e.rowid as element_id, e.ref as element_ref, e.label as element_label, e.element_type,";
 $sql .= " p.rowid as parent_id, p.ref as parent_ref, p.label as parent_label,";
 $sql .= " ra.rowid as ra_id, ra.ref as ra_ref, ra.cotation, ra.date_riskassessment, ra.comment as ra_comment,";
@@ -200,7 +259,13 @@ $sql .= "     GROUP BY fk_risk";
 $sql .= "   ) ra2 ON ra1.rowid = ra2.max_id";
 $sql .= " ) ra ON ra.fk_risk = r.rowid";
 $sql .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = ra.fk_user_creat";
-$sql .= " WHERE r.status <> -1 AND e.status = 1 AND r.entity = " . (int) $conf->entity . " AND r.type = '" . $db->escape($riskType) . "'";
+$sql .= " WHERE r.status <> -1 AND e.status = 1 AND r.type = '" . $db->escape($riskType) . "'";
+
+if ($filterEntity > 0) {
+    $sql .= " AND r.entity = " . (int) $filterEntity;
+} else {
+    $sql .= " AND r.entity IN (" . implode(',', array_map('intval', array_keys($entities))) . ")";
+}
 
 if (!empty($filterElementIds)) {
     $sql .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
@@ -231,6 +296,8 @@ if ($sortfield === 'ref') {
     $orderClause .= "r.ref " . $sortorder;
 } elseif ($sortfield === 'description') {
     $orderClause .= "r.description " . $sortorder;
+} elseif ($sortfield === 'entity') {
+    $orderClause .= "r.entity " . $sortorder;
 } elseif ($sortfield === 'element') {
     $orderClause .= "e.label " . $sortorder;
 } elseif ($sortfield === 'date') {
@@ -442,19 +509,30 @@ print '<style>
 .notion-tag {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     padding: 3px 8px;
-    border-radius: 6px;
-    font-size: 12px;
+    border-radius: 4px;
+    font-size: 11px;
     font-weight: 500;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .notion-tag-establishment {
-    background-color: #f3e8ff;
-    color: #6b21a8;
+    background-color: #f1f5f9;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+}
+.notion-tag-groupment {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
 }
 .notion-tag-workunit {
-    background-color: #e0f2fe;
-    color: #0369a1;
+    background-color: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
 }
 .notion-status-pill {
     display: inline-flex;
@@ -563,8 +641,8 @@ print '<div class="notion-wrapper">';
 
 // Header: Risk Type Tabs (Professionnels / Environnementaux)
 print '<div class="notion-header-tabs">';
-$urlRiskTypeProf = $_SERVER['PHP_SELF'] . '?risk_type=risk' . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '');
-$urlRiskTypeEnv  = $_SERVER['PHP_SELF'] . '?risk_type=riskenvironmental' . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '');
+$urlRiskTypeProf = $_SERVER['PHP_SELF'] . '?risk_type=risk' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '');
+$urlRiskTypeEnv  = $_SERVER['PHP_SELF'] . '?risk_type=riskenvironmental' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '');
 print '<a href="' . $urlRiskTypeProf . '" class="notion-tab-link' . ($riskType === 'risk' ? ' active' : '') . '">';
 print '<i class="fas fa-user-shield"></i> ' . $langs->trans('RiskTypeProfessional') . '</a>';
 print '<a href="' . $urlRiskTypeEnv . '" class="notion-tab-link' . ($riskType === 'riskenvironmental' ? ' active' : '') . '">';
@@ -572,7 +650,7 @@ print '<i class="fas fa-leaf"></i> ' . $langs->trans('RiskTypeEnvironmental') . 
 print '</div>';
 
 // Top Metrics Bar (Interactive Notion Pills)
-$baseUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType) . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
+$baseUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
 
 print '<div class="notion-metrics-bar">';
 
@@ -602,19 +680,27 @@ print '<span class="notion-metric-count">' . $counts['none'] . '</span> ' . $lan
 
 print '</div>';
 
-// Filters Card (Establishment & Search)
+// Filters Card (Establishment, GP/UT & Search)
 print '<form method="GET" action="' . $_SERVER['PHP_SELF'] . '" class="notion-filter-card">';
 print '<input type="hidden" name="risk_type" value="' . dol_escape_htmltag($riskType) . '">';
 print '<input type="hidden" name="cotation_filter" value="' . dol_escape_htmltag($cotationFilter) . '">';
 
-// Establishment Selector
-print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
-print '<span class="opacitymedium"><i class="fas fa-building"></i> ' . $langs->trans('FilterByEstablishment') . ' :</span>';
-$estabOptions = [0 => '-- ' . $langs->trans('AllEstablishments') . ' --'];
-foreach ($establishments as $eid => $elabel) {
-    $estabOptions[$eid] = $elabel;
+// Establishment (Company/Entity) Selector
+if (count($entities) > 1) {
+    print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
+    print '<span class="opacitymedium"><i class="fas fa-building"></i> ' . $langs->trans('FilterByEstablishment') . ' :</span>';
+    $estabOptions = [0 => '-- ' . $langs->trans('AllEstablishments') . ' --'];
+    foreach ($entities as $eid => $elabel) {
+        $estabOptions[$eid] = $elabel;
+    }
+    print Form::selectarray('filter_entity', $estabOptions, $filterEntity, 0, 0, 0, '', 0, 0, 0, '', 'minwidth200', 1);
+    print '</div>';
 }
-print Form::selectarray('establishment_id', $estabOptions, $establishmentId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth250', 1);
+
+// Groupment & WorkUnit (GP/UT) Selector
+print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
+print '<span class="opacitymedium"><i class="fas fa-sitemap"></i> ' . $langs->trans('FilterByGroupmentAndUnit') . ' :</span>';
+print Form::selectarray('element_id', $elementOptions, $elementId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth250', 1);
 print '</div>';
 
 // Search Input
@@ -624,14 +710,14 @@ print '</div>';
 
 // Submit and Reset Buttons
 print '<input type="submit" class="button small" value="' . $langs->trans('Search') . '">';
-if (!empty($search) || $establishmentId > 0 || $cotationFilter !== 'all') {
+if (!empty($search) || $filterEntity > 0 || $elementId > 0 || $cotationFilter !== 'all') {
     $resetUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType);
     print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . $langs->trans('Reset') . '"><i class="fas fa-times"></i></a>';
 }
 print '</form>';
 
 // Standard Dolibarr List Barre (Pagination & Counts)
-$param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . '&establishment_id=' . $establishmentId . '&search=' . urlencode($search);
+$param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
 print_barre_liste('', $page, $_SERVER['PHP_SELF'], $param, $sortfield, $sortorder, '', count($risks), $totalRows, 'fa-exclamation-triangle', 0, '', '', $limit, 0, 0, 1);
 
 // Notion Table
@@ -642,7 +728,8 @@ print '<table class="notion-table">';
 print '<thead><tr>';
 print_liste_field_titre('Ref', $_SERVER['PHP_SELF'], 'ref', '', $param, '', $sortfield, $sortorder, 'nowrap ');
 print_liste_field_titre('Description', $_SERVER['PHP_SELF'], 'description', '', $param, '', $sortfield, $sortorder);
-print_liste_field_titre($langs->trans('LocationEstablishment'), $_SERVER['PHP_SELF'], 'element', '', $param, '', $sortfield, $sortorder);
+print_liste_field_titre($langs->trans('Establishment'), $_SERVER['PHP_SELF'], 'entity', '', $param, '', $sortfield, $sortorder);
+print_liste_field_titre($langs->trans('GroupmentAndUnit'), $_SERVER['PHP_SELF'], 'element', '', $param, '', $sortfield, $sortorder);
 print_liste_field_titre($langs->trans('RiskLevel'), $_SERVER['PHP_SELF'], 'cotation', '', $param, '', $sortfield, $sortorder);
 print '<th><i class="fas fa-tasks"></i> ' . $langs->trans('ActionsAndTasks') . '</th>';
 print '<th class="center" style="width: 100px;">' . $langs->trans('Action') . '</th>';
@@ -650,11 +737,13 @@ print '</tr></thead>';
 
 print '<tbody>';
 if (empty($risks)) {
-    print '<tr><td colspan="6" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
+    print '<tr><td colspan="7" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
 } else {
     foreach ($risks as $r) {
         $riskId = (int) $r->rowid;
-        $urlRiskCard = dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId, 1);
+        $urlRiskCard = dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : ''), 1);
+        $riskEntityId   = (int) $r->entity;
+        $riskEntityName = $entities[$riskEntityId] ?? ($riskEntityId > 0 ? $langs->trans('Entity') . ' ' . $riskEntityId : '');
 
         // Danger Category Picto
         $catPos = (int) $r->category;
@@ -707,18 +796,29 @@ if (empty($risks)) {
         }
         print '</td>';
 
-        // Column 3: Establishment & Unit Hierarchy
+        // Column 3: Establishment (Company / Entity)
+        print '<td style="min-width: 140px;">';
+        print '<div class="notion-tag notion-tag-establishment">';
+        print '<i class="fas fa-building pictofixedwidth"></i> ' . dol_escape_htmltag($riskEntityName);
+        print '</div>';
+        print '</td>';
+
+        // Column 4: Groupment & WorkUnit (GP/UT)
         print '<td style="min-width: 180px;">';
         if (!empty($r->parent_label)) {
-            print '<div class="notion-tag notion-tag-establishment" style="margin-bottom: 4px;">';
-            print '<i class="fas fa-building"></i> ' . dol_escape_htmltag($r->parent_label);
+            print '<div class="notion-tag notion-tag-groupment" style="margin-bottom: 4px;" title="' . dol_escape_htmltag($langs->trans('Groupment')) . '">';
+            print '<i class="fas fa-folder pictofixedwidth"></i> ' . dol_escape_htmltag($r->parent_label);
             print '</div><br>';
-            print '<div class="notion-tag notion-tag-workunit">';
-            print '<i class="fas fa-sitemap"></i> ' . dol_escape_htmltag($r->element_label);
+            print '<div class="notion-tag notion-tag-workunit" title="' . dol_escape_htmltag($langs->trans('WorkUnit')) . '">';
+            print '<i class="fas fa-sitemap pictofixedwidth"></i> ' . dol_escape_htmltag($r->element_label);
+            print '</div>';
+        } elseif ($r->element_type === 'workunit') {
+            print '<div class="notion-tag notion-tag-workunit" title="' . dol_escape_htmltag($langs->trans('WorkUnit')) . '">';
+            print '<i class="fas fa-sitemap pictofixedwidth"></i> ' . dol_escape_htmltag($r->element_label);
             print '</div>';
         } else {
-            print '<div class="notion-tag notion-tag-establishment">';
-            print '<i class="fas fa-building"></i> ' . dol_escape_htmltag($r->element_label);
+            print '<div class="notion-tag notion-tag-groupment" title="' . dol_escape_htmltag($langs->trans('Groupment')) . '">';
+            print '<i class="fas fa-folder pictofixedwidth"></i> ' . dol_escape_htmltag($r->element_label);
             print '</div>';
         }
         print '</td>';
@@ -770,7 +870,7 @@ if (empty($risks)) {
             print '<div class="notion-task-list">';
             foreach ($riskTasks as $tk) {
                 $isCompleted = (int) $tk->progress >= 100;
-                $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1';
+                $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1' . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : '');
                 $isOverdue = false;
                 if (!$isCompleted && !empty($tk->datee)) {
                     $dueDate = $db->jdate($tk->datee);

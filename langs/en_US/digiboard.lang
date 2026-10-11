@@ -109,8 +109,14 @@ TicketPeriodAll          = All history
 #
 SimplifiedRiskList               = Simplified risk list
 SimplifiedRiskListDesc           = Interactive and simplified risk listing by establishment
+Establishment                    = Establishment
 FilterByEstablishment            = Establishment
 AllEstablishments                = All establishments
+GroupmentAndUnit                 = Groupment & Unit (GP/UT)
+FilterByGroupmentAndUnit         = Groupment & Unit
+AllGroupmentsAndUnits            = All groupments & units
+Groupment                        = Groupment
+WorkUnit                         = Work unit
 RiskLevel                        = Risk level
 AllRisks                         = All risks
 RiskLow                          = Low risk
