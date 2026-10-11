@@ -31,6 +31,7 @@ DigiriskStatsSharedTooltip      = Partagez vos statistiques avec les autres enti
 DIGIRISKSTATSSharing            = Partage des statistiques DigiRisk
 DIGIRISKSTATSSharingDescription = Sélection des entités qui partageront leurs statistiques DigiRisk avec cette entité.
 DigiRiskStatsList               = Statistiques DigiRisk
+ErrorGetDigiRiskStatsList       = Impossible de récupérer la liste des statistiques DigiRisk
 
 
 
