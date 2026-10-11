@@ -103,3 +103,34 @@ NbOfExchanges            = Messages
 TicketPeriodLastMonth    = Last month
 TicketPeriodLastMonths   = Last %s months
 TicketPeriodAll          = All history
+
+#
+# Risk Listing
+#
+SimplifiedRiskList               = Simplified risk list
+SimplifiedRiskListDesc           = Interactive and simplified risk listing by establishment
+FilterByEstablishment            = Establishment
+AllEstablishments                = All establishments
+RiskLevel                        = Risk level
+AllRisks                         = All risks
+RiskLow                          = Low risk
+RiskToPlan                       = Risk to plan
+RiskToTreat                      = Risk to treat
+RiskUnacceptable                 = Unacceptable risk
+RiskNotAssessed                  = Not assessed risk
+RisksCount                       = %s risks
+SearchRiskPlaceholder            = Search a risk, unit, task...
+ActionsAndTasks                  = Action plan
+NoTasks                          = No action
+TaskCompleted                    = Completed
+TaskInProgress                   = In progress
+LastAssessment                   = Last assessment
+EvaluatedBy                      = Evaluated by %s
+ViewRiskCard                     = View card
+LocationEstablishment            = Establishment & Unit
+RiskTypeProfessional            = Professional risks
+RiskTypeEnvironmental           = Environmental risks
+ModuleDigiriskDolibarrRequired   = The DigiRisk module must be enabled to view the risk listing.
+Overdue                          = Overdue
+AssessmentsCount                 = %s assessment(s)
+CotationScore                    = Cotation: %s

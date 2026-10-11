@@ -1,0 +1,830 @@
+<?php
+/* Copyright (C) 2026 EVARISK <technique@evarisk.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * \file    view/risk_list.php
+ * \ingroup digiboard
+ * \brief   Simplified interactive risk listing page (Notion style)
+ */
+
+// Load DigiBoard environment
+if (file_exists(__DIR__ . '/../digiboard.main.inc.php')) {
+    require_once __DIR__ . '/../digiboard.main.inc.php';
+} elseif (file_exists(__DIR__ . '/../../digiboard.main.inc.php')) {
+    require_once __DIR__ . '/../../digiboard.main.inc.php';
+} else {
+    die('Include of digiboard main fails');
+}
+
+// Global variables definitions
+global $conf, $db, $hookmanager, $langs, $moduleName, $user;
+
+// Load translation files required by the page
+saturne_load_langs(['digiboard@digiboard', 'projects']);
+
+// Security check
+if (!$user->rights->digiboard->read) {
+    accessforbidden();
+}
+
+$title   = $langs->transnoentities('SimplifiedRiskList');
+$helpUrl = 'FR:Module_' . $moduleName;
+
+saturne_header(0, '', $title, $helpUrl);
+
+// Check if Digirisk module is enabled
+if (empty($conf->digiriskdolibarr->enabled)) {
+    print load_fiche_titre($title, '', 'fa-exclamation-triangle');
+    print '<div class="warning paddingtopbottom">' . $langs->trans('ModuleDigiriskDolibarrRequired') . '</div>';
+    llxFooter();
+    $db->close();
+    exit;
+}
+
+// Get parameters
+$action          = GETPOST('action', 'aZ09');
+$establishmentId = GETPOSTINT('establishment_id');
+$cotationFilter  = GETPOST('cotation_filter', 'alpha');
+if (empty($cotationFilter)) {
+    $cotationFilter = 'all';
+}
+$riskType = GETPOSTISSET('risk_type') ? GETPOST('risk_type', 'alpha') : 'risk';
+if ($riskType !== 'riskenvironmental') {
+    $riskType = 'risk';
+}
+$search    = trim((string) GETPOST('search', 'alphanohtml'));
+$sortfield = GETPOST('sortfield', 'alpha');
+$sortorder = GETPOST('sortorder', 'alpha');
+$page      = GETPOSTINT('page') > 0 ? GETPOSTINT('page') : 0;
+$limit     = GETPOSTINT('limit') > 0 ? GETPOSTINT('limit') : $conf->liste_limit;
+
+if (empty($sortfield)) {
+    $sortfield = 'cotation';
+}
+if (empty($sortorder)) {
+    $sortorder = 'DESC';
+}
+
+// Load Danger Categories from Digirisk JSON file
+$dangerCategories = [];
+$dangerCategoriesFile = DOL_DOCUMENT_ROOT . '/custom/digiriskdolibarr/js/json/dangerCategories.json';
+if (file_exists($dangerCategoriesFile)) {
+    $jsonRaw = (string) file_get_contents($dangerCategoriesFile);
+    $json = json_decode($jsonRaw, true);
+    if (!empty($json[0][$riskType]) && is_array($json[0][$riskType])) {
+        foreach ($json[0][$riskType] as $cat) {
+            $dangerCategories[$cat['position']] = $cat;
+        }
+    }
+}
+
+// Fetch Establishments & Element hierarchy for the current entity
+$establishments   = [];
+$elements         = [];
+$elementsByParent = [];
+
+$sqlElements  = "SELECT rowid, ref, label, fk_parent, element_type";
+$sqlElements .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement";
+$sqlElements .= " WHERE entity = " . (int) $conf->entity . " AND status = 1";
+$sqlElements .= " ORDER BY label ASC";
+
+$resElements = $db->query($sqlElements);
+if ($resElements) {
+    while ($elem = $db->fetch_object($resElements)) {
+        $elements[(int) $elem->rowid] = $elem;
+        $elementsByParent[(int) $elem->fk_parent][] = (int) $elem->rowid;
+        if ($elem->element_type === 'groupment') {
+            $establishments[(int) $elem->rowid] = $elem->ref . ' - ' . $elem->label;
+        }
+    }
+    $db->free($resElements);
+}
+
+// Resolve descendant elements when an establishment is selected
+$filterElementIds = [];
+if ($establishmentId > 0 && isset($elements[$establishmentId])) {
+    $queue = [$establishmentId];
+    while (!empty($queue)) {
+        $curr = array_shift($queue);
+        $filterElementIds[] = (int) $curr;
+        if (!empty($elementsByParent[$curr])) {
+            foreach ($elementsByParent[$curr] as $childId) {
+                $queue[] = (int) $childId;
+            }
+        }
+    }
+}
+
+// Calculate Cotation Level Counts (for the interactive Notion-style metrics pills)
+$counts = [
+    'all'          => 0,
+    'low'          => 0,
+    'plan'         => 0,
+    'treat'        => 0,
+    'unacceptable' => 0,
+    'none'         => 0,
+];
+
+$sqlCounts  = "SELECT";
+$sqlCounts .= " CASE";
+$sqlCounts .= "   WHEN ra.cotation IS NULL THEN 'none'";
+$sqlCounts .= "   WHEN ra.cotation < 48 THEN 'low'";
+$sqlCounts .= "   WHEN ra.cotation < 51 THEN 'plan'";
+$sqlCounts .= "   WHEN ra.cotation < 80 THEN 'treat'";
+$sqlCounts .= "   ELSE 'unacceptable'";
+$sqlCounts .= " END as cotation_level,";
+$sqlCounts .= " COUNT(r.rowid) as cnt";
+$sqlCounts .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_risk r";
+$sqlCounts .= " INNER JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement e ON e.rowid = r.fk_element";
+$sqlCounts .= " LEFT JOIN (";
+$sqlCounts .= "   SELECT ra1.fk_risk, ra1.cotation";
+$sqlCounts .= "   FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment ra1";
+$sqlCounts .= "   INNER JOIN (";
+$sqlCounts .= "     SELECT fk_risk, MAX(rowid) as max_id";
+$sqlCounts .= "     FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment";
+$sqlCounts .= "     WHERE status = 1";
+$sqlCounts .= "     GROUP BY fk_risk";
+$sqlCounts .= "   ) ra2 ON ra1.rowid = ra2.max_id";
+$sqlCounts .= " ) ra ON ra.fk_risk = r.rowid";
+$sqlCounts .= " WHERE r.status <> -1 AND e.status = 1 AND r.entity = " . (int) $conf->entity . " AND r.type = '" . $db->escape($riskType) . "'";
+
+if (!empty($filterElementIds)) {
+    $sqlCounts .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
+}
+$sqlCounts .= " GROUP BY cotation_level";
+
+$resCounts = $db->query($sqlCounts);
+if ($resCounts) {
+    while ($row = $db->fetch_object($resCounts)) {
+        $lvl = (string) $row->cotation_level;
+        $cnt = (int) $row->cnt;
+        if (isset($counts[$lvl])) {
+            $counts[$lvl] = $cnt;
+        }
+        $counts['all'] += $cnt;
+    }
+    $db->free($resCounts);
+}
+
+// Build Main Risks Query
+$sql  = "SELECT r.rowid, r.ref, r.description, r.category, r.status, r.type,";
+$sql .= " e.rowid as element_id, e.ref as element_ref, e.label as element_label, e.element_type,";
+$sql .= " p.rowid as parent_id, p.ref as parent_ref, p.label as parent_label,";
+$sql .= " ra.rowid as ra_id, ra.ref as ra_ref, ra.cotation, ra.date_riskassessment, ra.comment as ra_comment,";
+$sql .= " u.rowid as ra_user_id, u.firstname as ra_user_firstname, u.lastname as ra_user_lastname";
+$sql .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_risk r";
+$sql .= " INNER JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement e ON e.rowid = r.fk_element";
+$sql .= " LEFT JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement p ON p.rowid = e.fk_parent";
+$sql .= " LEFT JOIN (";
+$sql .= "   SELECT ra1.rowid, ra1.fk_risk, ra1.ref, ra1.cotation, ra1.date_riskassessment, ra1.comment, ra1.fk_user_creat";
+$sql .= "   FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment ra1";
+$sql .= "   INNER JOIN (";
+$sql .= "     SELECT fk_risk, MAX(rowid) as max_id";
+$sql .= "     FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment";
+$sql .= "     WHERE status = 1";
+$sql .= "     GROUP BY fk_risk";
+$sql .= "   ) ra2 ON ra1.rowid = ra2.max_id";
+$sql .= " ) ra ON ra.fk_risk = r.rowid";
+$sql .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = ra.fk_user_creat";
+$sql .= " WHERE r.status <> -1 AND e.status = 1 AND r.entity = " . (int) $conf->entity . " AND r.type = '" . $db->escape($riskType) . "'";
+
+if (!empty($filterElementIds)) {
+    $sql .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
+}
+
+// Filter by Cotation Level
+if ($cotationFilter === 'low') {
+    $sql .= " AND ra.cotation IS NOT NULL AND ra.cotation < 48";
+} elseif ($cotationFilter === 'plan') {
+    $sql .= " AND ra.cotation >= 48 AND ra.cotation < 51";
+} elseif ($cotationFilter === 'treat') {
+    $sql .= " AND ra.cotation >= 51 AND ra.cotation < 80";
+} elseif ($cotationFilter === 'unacceptable') {
+    $sql .= " AND ra.cotation >= 80";
+} elseif ($cotationFilter === 'none') {
+    $sql .= " AND ra.cotation IS NULL";
+}
+
+// Text Search Filter
+if (!empty($search)) {
+    $esc = $db->escape($search);
+    $sql .= " AND (r.ref LIKE '%" . $esc . "%' OR r.description LIKE '%" . $esc . "%' OR e.label LIKE '%" . $esc . "%' OR e.ref LIKE '%" . $esc . "%' OR p.label LIKE '%" . $esc . "%')";
+}
+
+// Sorting Clause
+$orderClause = " ORDER BY ";
+if ($sortfield === 'ref') {
+    $orderClause .= "r.ref " . $sortorder;
+} elseif ($sortfield === 'description') {
+    $orderClause .= "r.description " . $sortorder;
+} elseif ($sortfield === 'element') {
+    $orderClause .= "e.label " . $sortorder;
+} elseif ($sortfield === 'date') {
+    $orderClause .= "ra.date_riskassessment " . $sortorder;
+} else {
+    // Default: cotation DESC, then ref ASC
+    $orderClause .= "CASE WHEN ra.cotation IS NULL THEN -1 ELSE ra.cotation END " . $sortorder . ", r.ref ASC";
+}
+
+// Count Total Matching Rows
+$posFrom   = strpos($sql, ' FROM ');
+$sqlTotal  = "SELECT COUNT(r.rowid) as total" . ($posFrom !== false ? substr($sql, $posFrom) : '');
+$resTotal  = $db->query($sqlTotal);
+$totalRows = 0;
+if ($resTotal) {
+    $totalRows = (int) $db->fetch_object($resTotal)->total;
+    $db->free($resTotal);
+}
+
+// Paginate and Fetch
+$sql .= $orderClause . $db->plimit($limit, $page * $limit);
+$res = $db->query($sql);
+
+$risks   = [];
+$riskIds = [];
+if ($res) {
+    while ($obj = $db->fetch_object($res)) {
+        $risks[]   = $obj;
+        $riskIds[] = (int) $obj->rowid;
+    }
+    $db->free($res);
+}
+
+// Fetch Tasks for the retrieved risks in batch
+$tasksByRisk = [];
+if (!empty($riskIds)) {
+    $sqlTasks  = "SELECT t.rowid, t.ref, t.label, t.progress, t.datee, te.fk_risk,";
+    $sqlTasks .= " u.rowid as user_id, u.firstname, u.lastname";
+    $sqlTasks .= " FROM " . MAIN_DB_PREFIX . "projet_task t";
+    $sqlTasks .= " JOIN " . MAIN_DB_PREFIX . "projet_task_extrafields te ON te.fk_object = t.rowid";
+    $sqlTasks .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = t.fk_user_creat";
+    $sqlTasks .= " WHERE te.fk_risk IN (" . implode(',', $riskIds) . ")";
+    $sqlTasks .= " ORDER BY t.rowid ASC";
+
+    $resTasks = $db->query($sqlTasks);
+    if ($resTasks) {
+        while ($t = $db->fetch_object($resTasks)) {
+            $tasksByRisk[(int) $t->fk_risk][] = $t;
+        }
+        $db->free($resTasks);
+    }
+}
+
+// Notion-Style CSS
+print '<style>
+.notion-wrapper {
+    margin-top: 15px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #37352f;
+}
+.notion-header-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 12px;
+}
+.notion-tab-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6b7280;
+    text-decoration: none;
+    transition: all 0.15s ease;
+}
+.notion-tab-link:hover {
+    background-color: #f3f4f6;
+    color: #111827;
+    text-decoration: none;
+}
+.notion-tab-link.active {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+}
+.notion-metrics-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    align-items: center;
+}
+.notion-metric-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+.notion-metric-pill:hover {
+    filter: brightness(0.95);
+    text-decoration: none;
+}
+.notion-metric-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* Metric Colors */
+.metric-all { background-color: #f3f4f6; color: #374151; }
+.metric-all .notion-metric-count { background: #3b82f6; color: #fff; }
+.metric-all.active { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+
+.metric-low { background-color: #ecfdf5; color: #065f46; }
+.metric-low .notion-metric-count { background: #10b981; color: #fff; }
+.metric-low.active { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); }
+
+.metric-plan { background-color: #fffbeb; color: #92400e; }
+.metric-plan .notion-metric-count { background: #f59e0b; color: #fff; }
+.metric-plan.active { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
+
+.metric-treat { background-color: #fef2f2; color: #991b1b; }
+.metric-treat .notion-metric-count { background: #ef4444; color: #fff; }
+.metric-treat.active { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.2); }
+
+.metric-unacceptable { background-color: #1f2937; color: #f9fafb; }
+.metric-unacceptable .notion-metric-count { background: #dc2626; color: #fff; }
+.metric-unacceptable.active { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,0.3); }
+
+.metric-none { background-color: #f8fafc; color: #64748b; border: 1px dashed #cbd5e1; }
+.metric-none .notion-metric-count { background: #94a3b8; color: #fff; }
+.metric-none.active { border-color: #64748b; box-shadow: 0 0 0 2px rgba(100,116,139,0.2); }
+
+.notion-filter-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+.notion-table-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+}
+.notion-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.notion-table th {
+    background: #f9fafb;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    color: #4b5563;
+    border-bottom: 1px solid #e5e7eb;
+    letter-spacing: 0.02em;
+}
+.notion-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: top;
+}
+.notion-table tr:last-child td {
+    border-bottom: none;
+}
+.notion-table tr:hover td {
+    background-color: #fbfcfd;
+}
+
+/* Notion Tag & Pill Badges */
+.notion-badge-ref {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #1e40af;
+    text-decoration: none;
+}
+.notion-badge-ref:hover {
+    text-decoration: underline;
+}
+.notion-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.notion-tag-establishment {
+    background-color: #f3e8ff;
+    color: #6b21a8;
+}
+.notion-tag-workunit {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+.notion-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.notion-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.status-low { background: #d1fae5; color: #065f46; }
+.status-low .notion-dot { background: #10b981; }
+
+.status-plan { background: #fef3c7; color: #92400e; }
+.status-plan .notion-dot { background: #f59e0b; }
+
+.status-treat { background: #fee2e2; color: #991b1b; }
+.status-treat .notion-dot { background: #ef4444; }
+
+.status-unacceptable { background: #111827; color: #f9fafb; }
+.status-unacceptable .notion-dot { background: #ef4444; }
+
+.status-none { background: #f1f5f9; color: #64748b; }
+.status-none .notion-dot { background: #94a3b8; }
+
+/* Checklist Task Styling */
+.notion-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+.notion-task-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: #f9fafb;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #f3f4f6;
+    font-size: 12px;
+}
+.notion-task-check {
+    margin-top: 2px;
+    font-size: 14px;
+}
+.notion-task-check.completed { color: #10b981; }
+.notion-task-check.pending { color: #9ca3af; }
+.notion-task-content {
+    flex: 1;
+}
+.notion-task-title {
+    font-weight: 500;
+    color: #1f2937;
+}
+.notion-task-meta {
+    font-size: 11px;
+    color: #6b7280;
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+}
+.notion-task-overdue {
+    color: #dc2626;
+    font-weight: 600;
+}
+.notion-progress-mini {
+    width: 60px;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 9999px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+}
+.notion-progress-bar {
+    height: 100%;
+    background: #10b981;
+}
+.notion-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    background-color: #f3f4f6;
+    color: #374151;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.15s ease;
+}
+.notion-action-btn:hover {
+    background-color: #e5e7eb;
+    color: #111827;
+    text-decoration: none;
+}
+</style>';
+
+print '<div class="notion-wrapper">';
+
+// Header: Risk Type Tabs (Professionnels / Environnementaux)
+print '<div class="notion-header-tabs">';
+$urlRiskTypeProf = $_SERVER['PHP_SELF'] . '?risk_type=risk' . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '');
+$urlRiskTypeEnv  = $_SERVER['PHP_SELF'] . '?risk_type=riskenvironmental' . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '');
+print '<a href="' . $urlRiskTypeProf . '" class="notion-tab-link' . ($riskType === 'risk' ? ' active' : '') . '">';
+print '<i class="fas fa-user-shield"></i> ' . $langs->trans('RiskTypeProfessional') . '</a>';
+print '<a href="' . $urlRiskTypeEnv . '" class="notion-tab-link' . ($riskType === 'riskenvironmental' ? ' active' : '') . '">';
+print '<i class="fas fa-leaf"></i> ' . $langs->trans('RiskTypeEnvironmental') . '</a>';
+print '</div>';
+
+// Top Metrics Bar (Interactive Notion Pills)
+$baseUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType) . ($establishmentId > 0 ? '&establishment_id=' . $establishmentId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
+
+print '<div class="notion-metrics-bar">';
+
+// All
+print '<a href="' . $baseUrl . '&cotation_filter=all" class="notion-metric-pill metric-all' . ($cotationFilter === 'all' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['all'] . '</span> ' . $langs->trans('AllRisks') . '</a>';
+
+// Low (< 48)
+print '<a href="' . $baseUrl . '&cotation_filter=low" class="notion-metric-pill metric-low' . ($cotationFilter === 'low' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['low'] . '</span> ' . $langs->trans('RiskLow') . '</a>';
+
+// Plan (48-50)
+print '<a href="' . $baseUrl . '&cotation_filter=plan" class="notion-metric-pill metric-plan' . ($cotationFilter === 'plan' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['plan'] . '</span> ' . $langs->trans('RiskToPlan') . '</a>';
+
+// Treat (51-79)
+print '<a href="' . $baseUrl . '&cotation_filter=treat" class="notion-metric-pill metric-treat' . ($cotationFilter === 'treat' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['treat'] . '</span> ' . $langs->trans('RiskToTreat') . '</a>';
+
+// Unacceptable (>= 80)
+print '<a href="' . $baseUrl . '&cotation_filter=unacceptable" class="notion-metric-pill metric-unacceptable' . ($cotationFilter === 'unacceptable' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['unacceptable'] . '</span> ' . $langs->trans('RiskUnacceptable') . '</a>';
+
+// None (Unassessed)
+print '<a href="' . $baseUrl . '&cotation_filter=none" class="notion-metric-pill metric-none' . ($cotationFilter === 'none' ? ' active' : '') . '">';
+print '<span class="notion-metric-count">' . $counts['none'] . '</span> ' . $langs->trans('RiskNotAssessed') . '</a>';
+
+print '</div>';
+
+// Filters Card (Establishment & Search)
+print '<form method="GET" action="' . $_SERVER['PHP_SELF'] . '" class="notion-filter-card">';
+print '<input type="hidden" name="risk_type" value="' . dol_escape_htmltag($riskType) . '">';
+print '<input type="hidden" name="cotation_filter" value="' . dol_escape_htmltag($cotationFilter) . '">';
+
+// Establishment Selector
+print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
+print '<span class="opacitymedium"><i class="fas fa-building"></i> ' . $langs->trans('FilterByEstablishment') . ' :</span>';
+$estabOptions = [0 => '-- ' . $langs->trans('AllEstablishments') . ' --'];
+foreach ($establishments as $eid => $elabel) {
+    $estabOptions[$eid] = $elabel;
+}
+print Form::selectarray('establishment_id', $estabOptions, $establishmentId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth250', 1);
+print '</div>';
+
+// Search Input
+print '<div style="display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 220px;">';
+print '<input type="text" name="search" class="centpercent" placeholder="' . $langs->trans('SearchRiskPlaceholder') . '" value="' . dol_escape_htmltag($search) . '">';
+print '</div>';
+
+// Submit and Reset Buttons
+print '<input type="submit" class="button small" value="' . $langs->trans('Search') . '">';
+if (!empty($search) || $establishmentId > 0 || $cotationFilter !== 'all') {
+    $resetUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType);
+    print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . $langs->trans('Reset') . '"><i class="fas fa-times"></i></a>';
+}
+print '</form>';
+
+// Standard Dolibarr List Barre (Pagination & Counts)
+$param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . '&establishment_id=' . $establishmentId . '&search=' . urlencode($search);
+print_barre_liste('', $page, $_SERVER['PHP_SELF'], $param, $sortfield, $sortorder, '', count($risks), $totalRows, 'fa-exclamation-triangle', 0, '', '', $limit, 0, 0, 1);
+
+// Notion Table
+print '<div class="notion-table-card">';
+print '<table class="notion-table">';
+
+// Header Row
+print '<thead><tr>';
+print_liste_field_titre('Ref', $_SERVER['PHP_SELF'], 'ref', '', $param, '', $sortfield, $sortorder, 'nowrap ');
+print_liste_field_titre('Description', $_SERVER['PHP_SELF'], 'description', '', $param, '', $sortfield, $sortorder);
+print_liste_field_titre($langs->trans('LocationEstablishment'), $_SERVER['PHP_SELF'], 'element', '', $param, '', $sortfield, $sortorder);
+print_liste_field_titre($langs->trans('RiskLevel'), $_SERVER['PHP_SELF'], 'cotation', '', $param, '', $sortfield, $sortorder);
+print '<th><i class="fas fa-tasks"></i> ' . $langs->trans('ActionsAndTasks') . '</th>';
+print '<th class="center" style="width: 100px;">' . $langs->trans('Action') . '</th>';
+print '</tr></thead>';
+
+print '<tbody>';
+if (empty($risks)) {
+    print '<tr><td colspan="6" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
+} else {
+    foreach ($risks as $r) {
+        $riskId = (int) $r->rowid;
+        $urlRiskCard = dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId, 1);
+
+        // Danger Category Picto
+        $catPos = (int) $r->category;
+        $catData = $dangerCategories[$catPos] ?? null;
+        $catName = $catData['name'] ?? '';
+        $pictoImg = '';
+        if (!empty($catData['thumbnail_name'])) {
+            $pictoPath = '/custom/digiriskdolibarr/img/categorieDangers/' . $catData['thumbnail_name'] . '.png';
+            $pictoImg = '<img src="' . dol_buildpath($pictoPath, 1) . '" alt="' . dol_escape_htmltag($catName) . '" title="' . dol_escape_htmltag($catName) . '" style="width: 28px; height: 28px; vertical-align: middle; margin-right: 6px;">';
+        } else {
+            $pictoImg = '<i class="fas fa-exclamation-triangle" style="color: #f59e0b; font-size: 20px; vertical-align: middle; margin-right: 6px;"></i>';
+        }
+
+        // Cotation Badge Info
+        $cotationVal = isset($r->cotation) && $r->cotation !== null ? (int) $r->cotation : null;
+        if ($cotationVal === null) {
+            $statusClass = 'status-none';
+            $statusLabel = $langs->trans('RiskNotAssessed');
+        } elseif ($cotationVal < 48) {
+            $statusClass = 'status-low';
+            $statusLabel = $langs->trans('RiskLow') . ' (' . $cotationVal . ')';
+        } elseif ($cotationVal < 51) {
+            $statusClass = 'status-plan';
+            $statusLabel = $langs->trans('RiskToPlan') . ' (' . $cotationVal . ')';
+        } elseif ($cotationVal < 80) {
+            $statusClass = 'status-treat';
+            $statusLabel = $langs->trans('RiskToTreat') . ' (' . $cotationVal . ')';
+        } else {
+            $statusClass = 'status-unacceptable';
+            $statusLabel = $langs->trans('RiskUnacceptable') . ' (' . $cotationVal . ')';
+        }
+
+        print '<tr>';
+
+        // Column 1: Ref & Category Icon
+        print '<td class="nowraponall" style="width: 140px;">';
+        print '<div style="display: flex; align-items: center;">';
+        print $pictoImg;
+        print '<a href="' . $urlRiskCard . '" class="notion-badge-ref" title="' . dol_escape_htmltag($langs->trans('ViewRiskCard')) . '">';
+        print dol_escape_htmltag($r->ref);
+        print '</a>';
+        print '</div>';
+        print '</td>';
+
+        // Column 2: Description
+        print '<td>';
+        print '<div style="font-weight: 600; color: #1f2937; margin-bottom: 2px;">' . dol_escape_htmltag($r->description) . '</div>';
+        if (!empty($catName)) {
+            print '<div style="font-size: 11px; color: #9ca3af;">' . dol_escape_htmltag($catName) . '</div>';
+        }
+        print '</td>';
+
+        // Column 3: Establishment & Unit Hierarchy
+        print '<td style="min-width: 180px;">';
+        if (!empty($r->parent_label)) {
+            print '<div class="notion-tag notion-tag-establishment" style="margin-bottom: 4px;">';
+            print '<i class="fas fa-building"></i> ' . dol_escape_htmltag($r->parent_label);
+            print '</div><br>';
+            print '<div class="notion-tag notion-tag-workunit">';
+            print '<i class="fas fa-sitemap"></i> ' . dol_escape_htmltag($r->element_label);
+            print '</div>';
+        } else {
+            print '<div class="notion-tag notion-tag-establishment">';
+            print '<i class="fas fa-building"></i> ' . dol_escape_htmltag($r->element_label);
+            print '</div>';
+        }
+        print '</td>';
+
+        // Column 4: Cotation & Last Assessment
+        print '<td style="min-width: 180px;">';
+        print '<div class="notion-status-pill ' . $statusClass . '">';
+        print '<span class="notion-dot"></span>' . dol_escape_htmltag($statusLabel);
+        print '</div>';
+        if ($cotationVal !== null) {
+            print '<div style="font-size: 11px; color: #6b7280; margin-top: 5px;">';
+            if (!empty($r->ra_user_firstname) || !empty($r->ra_user_lastname)) {
+                $evaluatorName = trim($r->ra_user_firstname . ' ' . $r->ra_user_lastname);
+                print '<i class="fas fa-user-check"></i> ' . dol_escape_htmltag($evaluatorName) . ' &bull; ';
+            }
+            if (!empty($r->date_riskassessment)) {
+                print dol_print_date($db->jdate($r->date_riskassessment), 'day');
+            }
+            print '</div>';
+            if (!empty($r->ra_comment)) {
+                print '<div style="font-size: 11px; color: #4b5563; font-style: italic; margin-top: 3px;" title="' . dol_escape_htmltag($r->ra_comment) . '">';
+                print '&laquo; ' . dol_trunc(dol_escape_htmltag($r->ra_comment), 60) . ' &raquo;';
+                print '</div>';
+            }
+        }
+        print '</td>';
+
+        // Column 5: Action Plan & Tasks
+        $riskTasks = $tasksByRisk[$riskId] ?? [];
+        $nbTasks   = count($riskTasks);
+        $nbDone    = 0;
+        foreach ($riskTasks as $t) {
+            if ((int) $t->progress >= 100) {
+                $nbDone++;
+            }
+        }
+
+        print '<td style="min-width: 280px;">';
+        if ($nbTasks === 0) {
+            print '<span style="font-size: 12px; color: #9ca3af; font-style: italic;">' . $langs->trans('NoTasks') . '</span>';
+        } else {
+            $pctDone = round(($nbDone / $nbTasks) * 100);
+            print '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">';
+            print '<span style="font-size: 12px; font-weight: 600; color: #374151;">' . sprintf($langs->trans('TasksCompleted'), $nbDone, $nbTasks) . '</span>';
+            print '<div class="notion-progress-mini"><div class="notion-progress-bar" style="width: ' . $pctDone . '%;"></div></div>';
+            print '<span style="font-size: 11px; color: #6b7280;">' . $pctDone . '%</span>';
+            print '</div>';
+
+            print '<div class="notion-task-list">';
+            foreach ($riskTasks as $tk) {
+                $isCompleted = (int) $tk->progress >= 100;
+                $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1';
+                $isOverdue = false;
+                if (!$isCompleted && !empty($tk->datee)) {
+                    $dueDate = $db->jdate($tk->datee);
+                    if ($dueDate && $dueDate < dol_now()) {
+                        $isOverdue = true;
+                    }
+                }
+
+                print '<div class="notion-task-item">';
+                print '<div class="notion-task-check ' . ($isCompleted ? 'completed' : 'pending') . '">';
+                print $isCompleted ? '<i class="fas fa-check-circle"></i>' : '<i class="far fa-circle"></i>';
+                print '</div>';
+
+                print '<div class="notion-task-content">';
+                print '<a href="' . $urlTask . '" target="_blank" rel="noopener" style="font-weight: 600; color: #2563eb; text-decoration: none; margin-right: 4px;">';
+                print dol_escape_htmltag($tk->ref);
+                print '</a>';
+                print '<span class="notion-task-title">' . dol_escape_htmltag($tk->label) . '</span>';
+
+                print '<div class="notion-task-meta">';
+                if (!empty($tk->firstname) || !empty($tk->lastname)) {
+                    print '<span><i class="fas fa-user"></i> ' . dol_escape_htmltag(trim($tk->firstname . ' ' . $tk->lastname)) . '</span>';
+                }
+                if (!empty($tk->datee)) {
+                    print '<span class="' . ($isOverdue ? 'notion-task-overdue' : '') . '">';
+                    print '<i class="far fa-calendar-alt"></i> ' . dol_print_date($db->jdate($tk->datee), 'day');
+                    if ($isOverdue) {
+                        print ' (' . $langs->trans('Overdue') . ')';
+                    }
+                    print '</span>';
+                }
+                print '</div>'; // end meta
+                print '</div>'; // end content
+                print '</div>'; // end item
+            }
+            print '</div>'; // end list
+        }
+        print '</td>';
+
+        // Column 6: Action Button
+        print '<td class="center" style="vertical-align: middle;">';
+        print '<a href="' . $urlRiskCard . '" class="notion-action-btn" title="' . dol_escape_htmltag($langs->trans('ViewRiskCard')) . '">';
+        print '<i class="fas fa-external-link-alt"></i> ' . $langs->trans('ViewRiskCard');
+        print '</a>';
+        print '</td>';
+
+        print '</tr>';
+    }
+}
+print '</tbody>';
+print '</table>';
+print '</div>'; // end notion-table-card
+
+print '</div>'; // end notion-wrapper
+
+llxFooter();
+$db->close();

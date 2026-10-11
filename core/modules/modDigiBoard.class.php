@@ -291,6 +291,22 @@ class modDigiBoard extends DolibarrModules
             'target'   => '',
             'user'     => 0,
         ];
+
+        $this->menu[$r++] = [
+            'fk_menu'  => 'fk_mainmenu=digiboard',
+            'type'     => 'left',
+            'titre'    => $langs->transnoentities('SimplifiedRiskList'),
+            'prefix'   => '<i class="fas fa-exclamation-triangle pictofixedwidth"></i>',
+            'mainmenu' => 'digiboard',
+            'leftmenu' => 'digiboardsimplifiedrisklist',
+            'url'      => '/digiboard/view/risk_list.php',
+            'langs'    => 'digiboard@digiboard',
+            'position' => 1000 + $r,
+            'enabled'  => '$conf->digiboard->enabled && !empty($conf->digiriskdolibarr->enabled)',
+            'perms'    => '$user->rights->digiboard->read',
+            'target'   => '',
+            'user'     => 0,
+        ];
     }
 
     /**
