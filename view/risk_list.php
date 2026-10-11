@@ -507,29 +507,35 @@ print '<style>
 }
 
 /* Metric Colors */
-.metric-all { background-color: #f3f4f6; color: #374151; }
-.metric-all .notion-metric-count { background: #3b82f6; color: #fff; }
-.metric-all.active { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+.metric-all, .metric-all:link, .metric-all:visited { background-color: #f3f4f6; color: #374151 !important; }
+.metric-all:hover { background-color: #e5e7eb; color: #111827 !important; text-decoration: none; }
+.metric-all .notion-metric-count { background: #3b82f6; color: #ffffff !important; }
+.metric-all.active { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25); }
 
-.metric-low { background-color: #ecfdf5; color: #065f46; }
-.metric-low .notion-metric-count { background: #10b981; color: #fff; }
-.metric-low.active { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); }
+.metric-low, .metric-low:link, .metric-low:visited { background-color: #f1f5f9; color: #4b5563 !important; }
+.metric-low:hover { background-color: #e2e8f0; color: #1e293b !important; text-decoration: none; }
+.metric-low .notion-metric-count { background: #64748b; color: #ffffff !important; }
+.metric-low.active { border-color: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.25); }
 
-.metric-plan { background-color: #fffbeb; color: #92400e; }
-.metric-plan .notion-metric-count { background: #f59e0b; color: #fff; }
-.metric-plan.active { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
+.metric-plan, .metric-plan:link, .metric-plan:visited { background-color: #fffbeb; color: #92400e !important; }
+.metric-plan:hover { background-color: #fef3c7; color: #78350f !important; text-decoration: none; }
+.metric-plan .notion-metric-count { background: #f59e0b; color: #ffffff !important; }
+.metric-plan.active { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25); }
 
-.metric-treat { background-color: #fef2f2; color: #991b1b; }
-.metric-treat .notion-metric-count { background: #ef4444; color: #fff; }
-.metric-treat.active { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.2); }
+.metric-treat, .metric-treat:link, .metric-treat:visited { background-color: #fef2f2; color: #991b1b !important; }
+.metric-treat:hover { background-color: #fee2e2; color: #7f1d1d !important; text-decoration: none; }
+.metric-treat .notion-metric-count { background: #ef4444; color: #ffffff !important; }
+.metric-treat.active { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25); }
 
-.metric-unacceptable { background-color: #1f2937; color: #f9fafb; }
-.metric-unacceptable .notion-metric-count { background: #dc2626; color: #fff; }
-.metric-unacceptable.active { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,0.3); }
+.metric-unacceptable, .metric-unacceptable:link, .metric-unacceptable:visited { background-color: #111827; color: #ffffff !important; }
+.metric-unacceptable:hover { background-color: #1f2937; color: #ffffff !important; text-decoration: none; }
+.metric-unacceptable .notion-metric-count { background: #dc2626; color: #ffffff !important; }
+.metric-unacceptable.active { border-color: #ffffff; box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.4); }
 
-.metric-none { background-color: #f8fafc; color: #64748b; border: 1px dashed #cbd5e1; }
-.metric-none .notion-metric-count { background: #94a3b8; color: #fff; }
-.metric-none.active { border-color: #64748b; box-shadow: 0 0 0 2px rgba(100,116,139,0.2); }
+.metric-none, .metric-none:link, .metric-none:visited { background-color: #f8fafc; color: #64748b !important; border: 1px dashed #cbd5e1; }
+.metric-none:hover { background-color: #f1f5f9; color: #334155 !important; text-decoration: none; }
+.metric-none .notion-metric-count { background: #94a3b8; color: #ffffff !important; }
+.metric-none.active { border-color: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.25); }
 
 .notion-filter-card {
     background: #fff;
@@ -669,10 +675,10 @@ print '<style>
     font-size: 12px;
     font-weight: 600;
 }
-.status-low { background: #d1fae5; color: #065f46; }
+.status-low { background: #f1f5f9; color: #4b5563; border: 1px solid #cbd5e1; }
 .status-plan { background: #fef3c7; color: #92400e; }
 .status-treat { background: #fee2e2; color: #991b1b; }
-.status-unacceptable { background: #111827; color: #f9fafb; }
+.status-unacceptable { background: #111827; color: #ffffff !important; }
 .status-none { background: #f1f5f9; color: #64748b; }
 
 /* Checklist Task Styling */
@@ -801,9 +807,11 @@ print '<span class="notion-metric-count">' . $counts['treat'] . '</span> ' . $la
 print '<a href="' . $baseUrl . '&cotation_filter=unacceptable" class="notion-metric-pill metric-unacceptable' . ($cotationFilter === 'unacceptable' ? ' active' : '') . '">';
 print '<span class="notion-metric-count">' . $counts['unacceptable'] . '</span> ' . $langs->trans('RiskUnacceptable') . '</a>';
 
-// None (Unassessed)
-print '<a href="' . $baseUrl . '&cotation_filter=none" class="notion-metric-pill metric-none' . ($cotationFilter === 'none' ? ' active' : '') . '">';
-print '<span class="notion-metric-count">' . $counts['none'] . '</span> ' . $langs->trans('RiskNotAssessed') . '</a>';
+// None (Unassessed) - Only shown if there are unassessed risks or currently filtered on it
+if ($counts['none'] > 0 || $cotationFilter === 'none') {
+    print '<a href="' . $baseUrl . '&cotation_filter=none" class="notion-metric-pill metric-none' . ($cotationFilter === 'none' ? ' active' : '') . '">';
+    print '<span class="notion-metric-count">' . $counts['none'] . '</span> ' . $langs->trans('RiskNotAssessed') . '</a>';
+}
 
 print '</div>';
 
