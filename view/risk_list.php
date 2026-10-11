@@ -569,9 +569,24 @@ print '<style>
 .notion-task-check {
     margin-top: 2px;
     font-size: 14px;
+    min-width: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 .notion-task-check.completed { color: #10b981; }
 .notion-task-check.pending { color: #9ca3af; }
+.notion-task-pct {
+    font-size: 10px;
+    font-weight: 700;
+    color: #1d4ed8;
+    background-color: #dbeafe;
+    border: 1px solid #bfdbfe;
+    padding: 1px 5px;
+    border-radius: 9999px;
+    line-height: 12px;
+    white-space: nowrap;
+}
 .notion-task-content {
     flex: 1;
 }
@@ -848,14 +863,15 @@ if (empty($risks)) {
         } else {
             $pctDone = round(($nbDone / $nbTasks) * 100);
             print '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">';
-            print '<span style="font-size: 12px; font-weight: 600; color: #374151;">' . sprintf($langs->trans('TasksCompleted'), $nbDone, $nbTasks) . '</span>';
+            print '<span style="font-size: 12px; font-weight: 600; color: #374151;">' . $langs->trans('TasksCompleted', $nbDone, $nbTasks) . '</span>';
             print '<div class="notion-progress-mini"><div class="notion-progress-bar" style="width: ' . $pctDone . '%;"></div></div>';
             print '<span style="font-size: 11px; color: #6b7280;">' . $pctDone . '%</span>';
             print '</div>';
 
             print '<div class="notion-task-list">';
             foreach ($riskTasks as $tk) {
-                $isCompleted = (int) $tk->progress >= 100;
+                $taskProgress = isset($tk->progress) && $tk->progress !== null ? (int) $tk->progress : 0;
+                $isCompleted = $taskProgress >= 100;
                 $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1' . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : '');
                 $isOverdue = false;
                 if (!$isCompleted && !empty($tk->datee)) {
@@ -866,9 +882,19 @@ if (empty($risks)) {
                 }
 
                 print '<div class="notion-task-item">';
-                print '<div class="notion-task-check ' . ($isCompleted ? 'completed' : 'pending') . '">';
-                print $isCompleted ? '<i class="fas fa-check-circle"></i>' : '<i class="far fa-circle"></i>';
-                print '</div>';
+                if ($isCompleted) {
+                    print '<div class="notion-task-check completed" title="100%">';
+                    print '<i class="fas fa-check-circle"></i>';
+                    print '</div>';
+                } elseif ($taskProgress > 0) {
+                    print '<div class="notion-task-check in-progress" title="' . $taskProgress . '%">';
+                    print '<span class="notion-task-pct">' . $taskProgress . '%</span>';
+                    print '</div>';
+                } else {
+                    print '<div class="notion-task-check pending" title="0%">';
+                    print '<i class="far fa-circle"></i>';
+                    print '</div>';
+                }
 
                 print '<div class="notion-task-content">';
                 print '<a href="' . $urlTask . '" target="_blank" rel="noopener" style="font-weight: 600; color: #2563eb; text-decoration: none; margin-right: 4px;">';
@@ -879,6 +905,9 @@ if (empty($risks)) {
                 print '<div class="notion-task-meta">';
                 if (!empty($tk->firstname) || !empty($tk->lastname)) {
                     print '<span><i class="fas fa-user"></i> ' . dol_escape_htmltag(trim($tk->firstname . ' ' . $tk->lastname)) . '</span>';
+                }
+                if ($taskProgress > 0 && !$isCompleted) {
+                    print '<span><i class="fas fa-tasks"></i> ' . $taskProgress . '%</span>';
                 }
                 if (!empty($tk->datee)) {
                     print '<span class="' . ($isOverdue ? 'notion-task-overdue' : '') . '">';
