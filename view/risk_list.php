@@ -115,13 +115,27 @@ if ($categoryId >= 0 && !isset($dangerCategories[$categoryId])) {
 }
 
 // Build options list for Danger Category dropdown
-$categoryOptions = [-1 => '-- ' . $langs->trans('AllCategories') . ' --'];
+$categoryOptions = [
+    -1 => [
+        'label'     => '-- ' . $langs->trans('AllCategories') . ' --',
+        'data-html' => '-- ' . $langs->trans('AllCategories') . ' --',
+    ],
+];
 $sortedCategories = $dangerCategories;
 uasort($sortedCategories, function ($a, $b) {
     return strcasecmp($a['name'], $b['name']);
 });
 foreach ($sortedCategories as $cat) {
-    $categoryOptions[(int) $cat['position']] = $cat['name'];
+    $pos = (int) $cat['position'];
+    $pictoImg = '';
+    if (!empty($cat['thumbnail_name'])) {
+        $pictoPath = '/custom/digiriskdolibarr/img/categorieDangers/' . $cat['thumbnail_name'] . '.png';
+        $pictoImg = '<img src="' . dol_buildpath($pictoPath, 1) . '" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 6px;">';
+    }
+    $categoryOptions[$pos] = [
+        'label'     => $cat['name'],
+        'data-html' => $pictoImg . dol_escape_htmltag($cat['name']),
+    ];
 }
 
 // Fetch Groupments & WorkUnits hierarchy for accessible entities
@@ -198,6 +212,46 @@ foreach ($elements as $eId => $e) {
     }
 }
 
+// Build Text Search Filter Clause
+$searchWhere = '';
+if (!empty($search)) {
+    $esc = $db->escape($search);
+
+    // Match danger category names from JSON
+    $matchingCatPositions = [];
+    foreach ($dangerCategories as $pos => $cat) {
+        if (stripos($cat['name'], $search) !== false) {
+            $matchingCatPositions[] = (int) $pos;
+        }
+    }
+    $catClause = !empty($matchingCatPositions) ? " OR r.category IN (" . implode(',', $matchingCatPositions) . ")" : "";
+
+    // Match accessible entities / establishments names
+    $matchingEntityIds = [];
+    foreach ($entities as $eId => $eLabel) {
+        if (stripos($eLabel, $search) !== false) {
+            $matchingEntityIds[] = (int) $eId;
+        }
+    }
+    $entityClause = !empty($matchingEntityIds) ? " OR r.entity IN (" . implode(',', $matchingEntityIds) . ")" : "";
+
+    $searchWhere = " AND (r.ref LIKE '%" . $esc . "%'
+        OR r.description LIKE '%" . $esc . "%'
+        OR e.label LIKE '%" . $esc . "%'
+        OR e.ref LIKE '%" . $esc . "%'
+        OR p.label LIKE '%" . $esc . "%'
+        OR ra.comment LIKE '%" . $esc . "%'
+        OR u.firstname LIKE '%" . $esc . "%'
+        OR u.lastname LIKE '%" . $esc . "%'
+        OR CONCAT(u.firstname, ' ', u.lastname) LIKE '%" . $esc . "%'" . $catClause . $entityClause . "
+        OR EXISTS (
+            SELECT 1 FROM " . MAIN_DB_PREFIX . "projet_task_extrafields te
+            INNER JOIN " . MAIN_DB_PREFIX . "projet_task t ON t.rowid = te.fk_object
+            WHERE te.fk_risk = r.rowid AND (t.ref LIKE '%" . $esc . "%' OR t.label LIKE '%" . $esc . "%')
+        )
+    )";
+}
+
 // Calculate Cotation Level Counts (for the interactive Notion-style metrics pills)
 $counts = [
     'all'          => 0,
@@ -219,8 +273,9 @@ $sqlCounts .= " END as cotation_level,";
 $sqlCounts .= " COUNT(r.rowid) as cnt";
 $sqlCounts .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_risk r";
 $sqlCounts .= " INNER JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement e ON e.rowid = r.fk_element";
+$sqlCounts .= " LEFT JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement p ON p.rowid = e.fk_parent";
 $sqlCounts .= " LEFT JOIN (";
-$sqlCounts .= "   SELECT ra1.fk_risk, ra1.cotation";
+$sqlCounts .= "   SELECT ra1.fk_risk, ra1.cotation, ra1.comment, ra1.fk_user_creat";
 $sqlCounts .= "   FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment ra1";
 $sqlCounts .= "   INNER JOIN (";
 $sqlCounts .= "     SELECT fk_risk, MAX(rowid) as max_id";
@@ -229,6 +284,7 @@ $sqlCounts .= "     WHERE status = 1";
 $sqlCounts .= "     GROUP BY fk_risk";
 $sqlCounts .= "   ) ra2 ON ra1.rowid = ra2.max_id";
 $sqlCounts .= " ) ra ON ra.fk_risk = r.rowid";
+$sqlCounts .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = ra.fk_user_creat";
 $sqlCounts .= " WHERE r.status <> -1 AND e.status = 1 AND r.type = '" . $db->escape($riskType) . "'";
 
 if ($filterEntity > 0) {
@@ -242,6 +298,9 @@ if (!empty($filterElementIds)) {
 }
 if ($categoryId >= 0) {
     $sqlCounts .= " AND r.category = " . (int) $categoryId;
+}
+if (!empty($searchWhere)) {
+    $sqlCounts .= $searchWhere;
 }
 $sqlCounts .= " GROUP BY cotation_level";
 
@@ -308,15 +367,16 @@ if ($cotationFilter === 'low') {
 }
 
 // Text Search Filter
-if (!empty($search)) {
-    $esc = $db->escape($search);
-    $sql .= " AND (r.ref LIKE '%" . $esc . "%' OR r.description LIKE '%" . $esc . "%' OR e.label LIKE '%" . $esc . "%' OR e.ref LIKE '%" . $esc . "%' OR p.label LIKE '%" . $esc . "%')";
+if (!empty($searchWhere)) {
+    $sql .= $searchWhere;
 }
 
 // Sorting Clause
 $orderClause = " ORDER BY ";
 if ($sortfield === 'ref') {
     $orderClause .= "r.ref " . $sortorder;
+} elseif ($sortfield === 'category') {
+    $orderClause .= "r.category " . $sortorder;
 } elseif ($sortfield === 'description') {
     $orderClause .= "r.description " . $sortorder;
 } elseif ($sortfield === 'entity') {
@@ -665,8 +725,8 @@ print '<div class="notion-wrapper">';
 
 // Header: Risk Type Tabs (Professionnels / Environnementaux)
 print '<div class="notion-header-tabs">';
-$urlRiskTypeProf = $_SERVER['PHP_SELF'] . '?risk_type=risk' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '');
-$urlRiskTypeEnv  = $_SERVER['PHP_SELF'] . '?risk_type=riskenvironmental' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '');
+$urlRiskTypeProf = $_SERVER['PHP_SELF'] . '?risk_type=risk' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
+$urlRiskTypeEnv  = $_SERVER['PHP_SELF'] . '?risk_type=riskenvironmental' . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
 print '<a href="' . $urlRiskTypeProf . '" class="notion-tab-link' . ($riskType === 'risk' ? ' active' : '') . '">';
 print '<i class="fas fa-user-shield"></i> ' . $langs->trans('RiskTypeProfessional') . '</a>';
 print '<a href="' . $urlRiskTypeEnv . '" class="notion-tab-link' . ($riskType === 'riskenvironmental' ? ' active' : '') . '">';
@@ -731,6 +791,30 @@ print '</div>';
 print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
 print '<span class="opacitymedium" title="' . dol_escape_htmltag($langs->trans('FilterByCategory')) . '"><i class="fas fa-exclamation-triangle pictofixedwidth"></i></span>';
 print Form::selectarray('category_id', $categoryOptions, $categoryId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth220', 1);
+print '<script nonce="' . getNonce() . '">
+$(document).ready(function() {
+    if ($.fn.select2 && $("#category_id").data("select2")) {
+        $("#category_id").select2({
+            templateResult: function(data, container) {
+                if (data.element && $(data.element).attr("data-html") !== undefined && typeof htmlEntityDecodeJs === "function") {
+                    return htmlEntityDecodeJs($(data.element).attr("data-html"));
+                }
+                return data.text;
+            },
+            templateSelection: function(selection) {
+                if (selection.element && $(selection.element).attr("data-html") !== undefined && typeof htmlEntityDecodeJs === "function") {
+                    return htmlEntityDecodeJs($(selection.element).attr("data-html"));
+                }
+                return selection.text;
+            },
+            escapeMarkup: function(m) { return m; },
+            containerCssClass: ":all:",
+            selectionCssClass: ":all:",
+            dropdownCssClass: "ui-dialog"
+        });
+    }
+});
+</script>';
 print '</div>';
 
 // Search Input
@@ -757,6 +841,7 @@ print '<table class="notion-table">';
 // Header Row
 print '<thead><tr>';
 print_liste_field_titre('Ref', $_SERVER['PHP_SELF'], 'ref', '', $param, '', $sortfield, $sortorder, 'nowrap ');
+print_liste_field_titre($langs->trans('Cat'), $_SERVER['PHP_SELF'], 'category', '', $param, '', $sortfield, $sortorder, 'center nowrap ');
 print_liste_field_titre('Description', $_SERVER['PHP_SELF'], 'description', '', $param, '', $sortfield, $sortorder);
 print_liste_field_titre($langs->trans('Establishment'), $_SERVER['PHP_SELF'], 'entity', '', $param, '', $sortfield, $sortorder);
 print_liste_field_titre($langs->trans('GroupmentAndUnit'), $_SERVER['PHP_SELF'], 'element', '', $param, '', $sortfield, $sortorder);
@@ -767,7 +852,7 @@ print '</tr></thead>';
 
 print '<tbody>';
 if (empty($risks)) {
-    print '<tr><td colspan="7" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
+    print '<tr><td colspan="8" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
 } else {
     foreach ($risks as $r) {
         $riskId = (int) $r->rowid;
@@ -782,9 +867,9 @@ if (empty($risks)) {
         $pictoImg = '';
         if (!empty($catData['thumbnail_name'])) {
             $pictoPath = '/custom/digiriskdolibarr/img/categorieDangers/' . $catData['thumbnail_name'] . '.png';
-            $pictoImg = '<img src="' . dol_buildpath($pictoPath, 1) . '" alt="' . dol_escape_htmltag($catName) . '" title="' . dol_escape_htmltag($catName) . '" style="width: 28px; height: 28px; vertical-align: middle; margin-right: 6px;">';
+            $pictoImg = '<img src="' . dol_buildpath($pictoPath, 1) . '" alt="' . dol_escape_htmltag($catName) . '" title="' . dol_escape_htmltag($catName) . '" style="width: 28px; height: 28px; vertical-align: middle;">';
         } else {
-            $pictoImg = '<i class="fas fa-exclamation-triangle" style="color: #f59e0b; font-size: 20px; vertical-align: middle; margin-right: 6px;"></i>';
+            $pictoImg = '<i class="fas fa-exclamation-triangle" title="' . dol_escape_htmltag($catName) . '" style="color: #f59e0b; font-size: 20px; vertical-align: middle;"></i>';
         }
 
         // Cotation Badge Info
@@ -808,17 +893,19 @@ if (empty($risks)) {
 
         print '<tr>';
 
-        // Column 1: Ref & Category Icon
-        print '<td class="nowraponall" style="width: 140px;">';
-        print '<div style="display: flex; align-items: center;">';
-        print $pictoImg;
+        // Column 1: Ref
+        print '<td class="nowraponall" style="width: 80px;">';
         print '<a href="' . $urlRiskCard . '" class="notion-badge-ref" title="' . dol_escape_htmltag($langs->trans('ViewRiskCard')) . '">';
         print dol_escape_htmltag($r->ref);
         print '</a>';
-        print '</div>';
         print '</td>';
 
-        // Column 2: Description
+        // Column 2: Danger Category Picto
+        print '<td class="center" style="width: 50px;">';
+        print $pictoImg;
+        print '</td>';
+
+        // Column 3: Description
         print '<td>';
         print '<div style="font-weight: 600; color: #1f2937; margin-bottom: 2px;">' . dol_escape_htmltag($r->description) . '</div>';
         if (!empty($catName)) {
