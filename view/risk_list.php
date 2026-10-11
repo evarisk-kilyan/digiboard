@@ -542,6 +542,29 @@ print '<style>
     align-items: center;
     gap: 12px;
 }
+.notion-search-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 220px;
+}
+.notion-search-group input[type="text"] {
+    flex: 1;
+    min-width: 120px;
+}
+.notion-search-group .button {
+    margin: 0;
+    white-space: nowrap;
+}
+.notion-search-group .button-cancel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    padding: 0 10px;
+    margin: 0;
+}
 .notion-table-card {
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -817,17 +840,15 @@ $(document).ready(function() {
 </script>';
 print '</div>';
 
-// Search Input
-print '<div style="display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 220px;">';
+// Search Input and Action Buttons
+print '<div class="notion-search-group">';
 print '<input type="text" name="search" class="centpercent" placeholder="' . $langs->trans('SearchRiskPlaceholder') . '" value="' . dol_escape_htmltag($search) . '">';
-print '</div>';
-
-// Submit and Reset Buttons
 print '<input type="submit" class="button small" value="' . $langs->trans('Search') . '">';
 if (!empty($search) || $filterEntity > 0 || $elementId > 0 || $categoryId >= 0 || $cotationFilter !== 'all') {
     $resetUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType);
-    print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . $langs->trans('Reset') . '"><i class="fas fa-times"></i></a>';
+    print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . dol_escape_htmltag($langs->trans('Reset')) . '"><i class="fas fa-times"></i></a>';
 }
+print '</div>';
 print '</form>';
 
 // Standard Dolibarr List Barre (Pagination & Counts)
