@@ -674,7 +674,7 @@ print '<input type="hidden" name="cotation_filter" value="' . dol_escape_htmltag
 // Establishment (Company/Entity) Selector
 if (count($entities) > 1) {
     print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
-    print '<span class="opacitymedium"><i class="fas fa-building"></i> ' . $langs->trans('FilterByEstablishment') . ' :</span>';
+    print '<span class="opacitymedium" title="' . dol_escape_htmltag($langs->trans('FilterByEstablishment')) . '"><i class="fas fa-building pictofixedwidth"></i></span>';
     $estabOptions = [0 => '-- ' . $langs->trans('AllEstablishments') . ' --'];
     foreach ($entities as $eid => $elabel) {
         $estabOptions[$eid] = $elabel;
@@ -685,7 +685,7 @@ if (count($entities) > 1) {
 
 // Groupment & WorkUnit (GP/UT) Selector
 print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
-print '<span class="opacitymedium"><i class="fas fa-sitemap"></i> ' . $langs->trans('FilterByGroupmentAndUnit') . ' :</span>';
+print '<span class="opacitymedium" title="' . dol_escape_htmltag($langs->trans('FilterByGroupmentAndUnit')) . '"><i class="fas fa-sitemap pictofixedwidth"></i></span>';
 print Form::selectarray('element_id', $elementOptions, $elementId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth250', 1);
 print '</div>';
 
