@@ -554,16 +554,36 @@ print '<style>
     min-width: 120px;
 }
 .notion-search-group .button {
-    margin: 0;
+    margin: 0 !important;
     white-space: nowrap;
 }
-.notion-search-group .button-cancel {
+.notion-btn-reset {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 30px;
     height: 30px;
-    padding: 0 10px;
-    margin: 0;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 4px;
+    background-color: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+    font-size: 13px;
+    line-height: 1;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    cursor: pointer;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.notion-btn-reset:hover {
+    background-color: #fee2e2;
+    color: #dc2626;
+    border-color: #fca5a5;
+    text-decoration: none !important;
 }
 .notion-table-card {
     background: #fff;
@@ -846,7 +866,7 @@ print '<input type="text" name="search" class="centpercent" placeholder="' . $la
 print '<input type="submit" class="button small" value="' . $langs->trans('Search') . '">';
 if (!empty($search) || $filterEntity > 0 || $elementId > 0 || $categoryId >= 0 || $cotationFilter !== 'all') {
     $resetUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType);
-    print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . dol_escape_htmltag($langs->trans('Reset')) . '"><i class="fas fa-times"></i></a>';
+    print '<a href="' . $resetUrl . '" class="notion-btn-reset" title="' . dol_escape_htmltag($langs->trans('Reset')) . '"><i class="fas fa-times"></i></a>';
 }
 print '</div>';
 print '</form>';
