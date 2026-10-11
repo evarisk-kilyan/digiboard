@@ -58,7 +58,10 @@ class ActionsDigiboard
      */
     public function __construct(DoliDB $db)
     {
+        global $langs;
+
         $this->db = $db;
+        $langs->load('digiboard@digiboard');
     }
 
     /**
@@ -69,6 +72,10 @@ class ActionsDigiboard
      */
     public function addHtmlHeader(array $parameters): int
     {
+        global $langs;
+
+        $langs->load('digiboard@digiboard');
+
         if (strpos($parameters['context'], 'digiboardindex') !== false) {
             $resourcesRequired = [
                 'css'        => '/custom/digiriskdolibarr/css/digiriskdolibarr.min.css',
