@@ -914,7 +914,7 @@ if (empty($risks)) {
         }
 
         // Cotation Badge Info
-        $cotationVal = isset($r->cotation) && $r->cotation !== null ? (int) $r->cotation : null;
+        $cotationVal = isset($r->cotation) ? (int) $r->cotation : null;
         if ($cotationVal === null) {
             $statusClass = 'status-none';
             $statusLabel = $langs->trans('RiskNotAssessed');
@@ -1027,7 +1027,7 @@ if (empty($risks)) {
 
             print '<div class="notion-task-list">';
             foreach ($riskTasks as $tk) {
-                $taskProgress = isset($tk->progress) && $tk->progress !== null ? (int) $tk->progress : 0;
+                $taskProgress = isset($tk->progress) ? (int) $tk->progress : 0;
                 $isCompleted = $taskProgress >= 100;
                 $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1' . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : '');
                 $isOverdue = false;
