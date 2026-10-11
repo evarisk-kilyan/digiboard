@@ -130,6 +130,7 @@ ActionsAndTasks                  = Action plan
 NoTasks                          = No action
 TaskCompleted                    = Completed
 TaskInProgress                   = In progress
+TasksCompleted                   = %s / %s actions completed
 LastAssessment                   = Last assessment
 EvaluatedBy                      = Evaluated by %s
 ViewRiskCard                     = View card

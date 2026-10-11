@@ -543,25 +543,11 @@ print '<style>
     font-size: 12px;
     font-weight: 600;
 }
-.notion-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}
 .status-low { background: #d1fae5; color: #065f46; }
-.status-low .notion-dot { background: #10b981; }
-
 .status-plan { background: #fef3c7; color: #92400e; }
-.status-plan .notion-dot { background: #f59e0b; }
-
 .status-treat { background: #fee2e2; color: #991b1b; }
-.status-treat .notion-dot { background: #ef4444; }
-
 .status-unacceptable { background: #111827; color: #f9fafb; }
-.status-unacceptable .notion-dot { background: #ef4444; }
-
 .status-none { background: #f1f5f9; color: #64748b; }
-.status-none .notion-dot { background: #94a3b8; }
 
 /* Checklist Task Styling */
 .notion-task-list {
@@ -823,10 +809,10 @@ if (empty($risks)) {
         }
         print '</td>';
 
-        // Column 4: Cotation & Last Assessment
+        // Column 5: Cotation & Last Assessment
         print '<td style="min-width: 180px;">';
         print '<div class="notion-status-pill ' . $statusClass . '">';
-        print '<span class="notion-dot"></span>' . dol_escape_htmltag($statusLabel);
+        print dol_escape_htmltag($statusLabel);
         print '</div>';
         if ($cotationVal !== null) {
             print '<div style="font-size: 11px; color: #6b7280; margin-top: 5px;">';

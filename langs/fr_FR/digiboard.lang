@@ -132,6 +132,7 @@ ActionsAndTasks                  = Plan d'actions
 NoTasks                          = Aucune action
 TaskCompleted                    = Terminée
 TaskInProgress                   = En cours
+TasksCompleted                   = %s / %s actions terminées
 LastAssessment                   = Dernière évaluation
 EvaluatedBy                      = Évalué par %s
 ViewRiskCard                     = Voir la fiche
