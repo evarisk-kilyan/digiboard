@@ -59,6 +59,7 @@ if (empty($conf->digiriskdolibarr->enabled)) {
 $action       = GETPOST('action', 'aZ09');
 $filterEntity = GETPOSTINT('filter_entity');
 $elementId    = GETPOSTISSET('element_id') ? GETPOSTINT('element_id') : GETPOSTINT('establishment_id');
+$categoryId   = (GETPOSTISSET('category_id') && GETPOST('category_id') !== '' && (int) GETPOST('category_id') >= 0) ? GETPOSTINT('category_id') : -1;
 $cotationFilter  = GETPOST('cotation_filter', 'alpha');
 if (empty($cotationFilter)) {
     $cotationFilter = 'all';
@@ -106,6 +107,21 @@ if (file_exists($dangerCategoriesFile)) {
             $dangerCategories[$cat['position']] = $cat;
         }
     }
+}
+
+// Validate category_id
+if ($categoryId >= 0 && !isset($dangerCategories[$categoryId])) {
+    $categoryId = -1;
+}
+
+// Build options list for Danger Category dropdown
+$categoryOptions = [-1 => '-- ' . $langs->trans('AllCategories') . ' --'];
+$sortedCategories = $dangerCategories;
+uasort($sortedCategories, function ($a, $b) {
+    return strcasecmp($a['name'], $b['name']);
+});
+foreach ($sortedCategories as $cat) {
+    $categoryOptions[(int) $cat['position']] = $cat['name'];
 }
 
 // Fetch Groupments & WorkUnits hierarchy for accessible entities
@@ -224,6 +240,9 @@ if ($filterEntity > 0) {
 if (!empty($filterElementIds)) {
     $sqlCounts .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
 }
+if ($categoryId >= 0) {
+    $sqlCounts .= " AND r.category = " . (int) $categoryId;
+}
 $sqlCounts .= " GROUP BY cotation_level";
 
 $resCounts = $db->query($sqlCounts);
@@ -269,6 +288,10 @@ if ($filterEntity > 0) {
 
 if (!empty($filterElementIds)) {
     $sql .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
+}
+
+if ($categoryId >= 0) {
+    $sql .= " AND r.category = " . (int) $categoryId;
 }
 
 // Filter by Cotation Level
@@ -651,7 +674,7 @@ print '<i class="fas fa-leaf"></i> ' . $langs->trans('RiskTypeEnvironmental') . 
 print '</div>';
 
 // Top Metrics Bar (Interactive Notion Pills)
-$baseUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
+$baseUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . ($categoryId >= 0 ? '&category_id=' . $categoryId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
 
 print '<div class="notion-metrics-bar">';
 
@@ -681,7 +704,7 @@ print '<span class="notion-metric-count">' . $counts['none'] . '</span> ' . $lan
 
 print '</div>';
 
-// Filters Card (Establishment, GP/UT & Search)
+// Filters Card (Establishment, GP/UT, Category & Search)
 print '<form method="GET" action="' . $_SERVER['PHP_SELF'] . '" class="notion-filter-card">';
 print '<input type="hidden" name="risk_type" value="' . dol_escape_htmltag($riskType) . '">';
 print '<input type="hidden" name="cotation_filter" value="' . dol_escape_htmltag($cotationFilter) . '">';
@@ -704,6 +727,12 @@ print '<span class="opacitymedium" title="' . dol_escape_htmltag($langs->trans('
 print Form::selectarray('element_id', $elementOptions, $elementId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth250', 1);
 print '</div>';
 
+// Category Selector
+print '<div style="display: inline-flex; align-items: center; gap: 8px;">';
+print '<span class="opacitymedium" title="' . dol_escape_htmltag($langs->trans('FilterByCategory')) . '"><i class="fas fa-exclamation-triangle pictofixedwidth"></i></span>';
+print Form::selectarray('category_id', $categoryOptions, $categoryId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth220', 1);
+print '</div>';
+
 // Search Input
 print '<div style="display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 220px;">';
 print '<input type="text" name="search" class="centpercent" placeholder="' . $langs->trans('SearchRiskPlaceholder') . '" value="' . dol_escape_htmltag($search) . '">';
@@ -711,14 +740,14 @@ print '</div>';
 
 // Submit and Reset Buttons
 print '<input type="submit" class="button small" value="' . $langs->trans('Search') . '">';
-if (!empty($search) || $filterEntity > 0 || $elementId > 0 || $cotationFilter !== 'all') {
+if (!empty($search) || $filterEntity > 0 || $elementId > 0 || $categoryId >= 0 || $cotationFilter !== 'all') {
     $resetUrl = $_SERVER['PHP_SELF'] . '?risk_type=' . urlencode($riskType);
     print '<a href="' . $resetUrl . '" class="button button-cancel small" title="' . $langs->trans('Reset') . '"><i class="fas fa-times"></i></a>';
 }
 print '</form>';
 
 // Standard Dolibarr List Barre (Pagination & Counts)
-$param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
+$param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . ($categoryId >= 0 ? '&category_id=' . $categoryId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
 print_barre_liste('', $page, $_SERVER['PHP_SELF'], $param, $sortfield, $sortorder, '', count($risks), $totalRows, 'fa-exclamation-triangle', 0, '', '', $limit, 0, 0, 1);
 
 // Notion Table
