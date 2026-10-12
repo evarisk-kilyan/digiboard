@@ -4,6 +4,12 @@ Description : Tous vos risques, tous vos établissements, un seul écran. DigiBo
 
 **Cette version demande Saturne 23.2.1 ou supérieur.**
 
+## 🎬 La nouveauté en vidéo
+
+[![La liste simplifiée des risques en vidéo (48 s)](https://raw.githubusercontent.com/nicolas-eoxia/digiboard/assets/release-23.2.0/video_poster_23.2.0.jpeg)](https://github.com/Evarisk/digiboard/releases/download/23.2.0/digiboard-23.2.0.mp4)
+
+*Cliquez sur l'image pour lancer la vidéo (48 s).*
+
 ## 🚀 Pack nouveautés
 
 ### Liste simplifiée des risques
