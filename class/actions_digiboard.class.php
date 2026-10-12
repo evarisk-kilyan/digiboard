@@ -58,10 +58,7 @@ class ActionsDigiboard
      */
     public function __construct(DoliDB $db)
     {
-        global $langs;
-
         $this->db = $db;
-        $langs->load('digiboard@digiboard');
     }
 
     /**
@@ -74,6 +71,8 @@ class ActionsDigiboard
     {
         global $langs;
 
+        // Not in the constructor: hooks are built before main.inc.php applies the user language, and a
+        // domain loaded once is never reloaded. Needed here by the Multicompany entity card (sharing labels)
         $langs->load('digiboard@digiboard');
 
         if (strpos($parameters['context'], 'digiboardindex') !== false) {
