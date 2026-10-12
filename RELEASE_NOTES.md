@@ -1,35 +1,47 @@
 # [DigiBoard] [23.2.0] - Liste simplifiée des risques
 
-Description : Cette version ajoute une liste simplifiée des risques, qui rassemble sur un seul écran les risques de tous les établissements avec leur cotation et l'avancement de leur plan d'action. Elle corrige aussi l'ouverture des documents Digirisk d'une autre entité sous Dolibarr 24, et dote le module d'une traduction anglaise.
+Description : Tous vos risques, tous vos établissements, un seul écran. DigiBoard 23.2.0 ajoute une liste des risques pensée pour le suivi au quotidien : on voit d'un coup d'œil où sont les priorités, qui s'en occupe et où en est le plan d'action.
 
 **Cette version demande Saturne 23.2.1 ou supérieur.**
 
-## Nouvelles fonctionnalités et innovations
+## 🚀 Pack nouveautés
 
 ### Liste simplifiée des risques
 
-<!-- 📸 Ajouter une screenshot ici -->
+![Listing simplifié des risques](https://raw.githubusercontent.com/nicolas-eoxia/digiboard/assets/release-23.2.0/risk_list_23.2.0.png)
 
-* Une nouvelle page **Listing simplifié des risques**, accessible depuis le menu DigiBoard et depuis le menu gauche de Digirisk, présente les risques sous forme de liste lisible d'un coup d'œil : référence, pictogramme de la catégorie de danger, description, établissement, groupement ou unité de travail, cotation et plan d'action.
-* Deux onglets séparent les **risques professionnels** et les **risques environnementaux**.
-* Une barre de compteurs donne le nombre de risques par niveau — faible, à planifier, à traiter, inacceptable, non évalué — et filtre la liste d'un clic. Le niveau « non évalué » n'apparaît que s'il compte au moins un risque.
-* Filtres par **établissement**, par **groupement ou unité de travail** et par **catégorie de danger**, plus une recherche libre sur le risque, l'unité ou la tâche.
-* Pour chaque risque, le plan d'action affiche ses tâches, leur responsable, leur échéance et une **barre d'avancement** (tâches terminées sur le total, pourcentage déclaré).
-* Sur une installation multi-entités, la liste réunit les risques des entités partagées ; un clic sur un risque ou une tâche d'une autre entité **bascule dans cette entité** et ouvre directement la fiche.
+**Le document unique se pilote enfin depuis une seule page.** Plus besoin d'ouvrir chaque groupement ou unité de travail pour savoir où vous en êtes : la nouvelle page **Listing simplifié des risques** rassemble tous les risques avec leur cotation, leur emplacement et leur plan d'action.
 
-La page demande que Digirisk soit activé. **Les entrées de menu n'apparaissent qu'après une désactivation puis une réactivation de DigiBoard**, Dolibarr n'enregistrant les menus d'un module qu'à son activation.
+* **Les priorités sautent aux yeux.** En haut de page, un compteur par niveau — faible, à planifier, à traiter, inacceptable, non évalué. Un clic sur un compteur n'affiche plus que les risques de ce niveau : la préparation d'un comité ou d'une revue de direction commence là.
+* **Le plan d'action sous les yeux, sans changer de page.** Chaque risque affiche ses actions correctives, leur responsable, leur échéance et une barre d'avancement. On repère tout de suite un risque à planifier sans action, ou un plan resté à mi-chemin.
+* **Professionnels et environnementaux, chacun leur onglet.** Les deux registres se consultent séparément, avec les mêmes outils.
+* **Un clic pour agir.** La fiche du risque ou de la tâche s'ouvre directement depuis la liste.
 
-## Améliorations & corrections
+### Filtrer en un instant
 
-### Documents Digirisk
+![Filtre par catégorie de danger](https://raw.githubusercontent.com/nicolas-eoxia/digiboard/assets/release-23.2.0/risk_list_categories.png)
 
-* **Sous Dolibarr 24, un document Digirisk d'une autre entité ouvert depuis le tableau de bord renvoyait « Le fichier n'existe pas ».** Dolibarr 24 remplace l'entité demandée par celle de la session avant d'appeler le module ; DigiBoard relit désormais l'entité dans la requête, quel que soit le cœur.
+* Filtrez par **établissement**, par **groupement ou unité de travail** et par **catégorie de danger** — chaque catégorie avec son pictogramme, pour la retrouver sans lire.
+* Une recherche libre retrouve un risque, une unité ou une tâche en quelques lettres.
+* Exemple : « tous les risques de chute de hauteur encore à planifier sur le site de Lyon » s'affiche en quelques clics : les filtres se combinent avec les compteurs.
 
-### Traductions
+### Pensée pour les groupes multi-sites
 
-* Le module dispose désormais d'une **traduction anglaise**.
-* Le bloc de partage des statistiques DigiRisk de la fiche entité Multicompany affichait ses clés brutes (`DIGIRISKSTATSSharing`) ; il est traduit.
-* Les textes du module s'affichent dans la **langue de l'utilisateur**, et non dans celle de son navigateur quand les deux diffèrent.
+* Avec Multicompany, la liste réunit les risques de **toutes les entités partagées** et indique l'établissement de chacun. Un responsable QSE suit l'ensemble de ses sites depuis un seul écran.
+* Un clic sur un risque ou une tâche d'une autre entité **bascule automatiquement dans cette entité** et ouvre la fiche.
+
+La page est accessible depuis le menu DigiBoard et depuis le menu de Digirisk, qui doit être activé. **Après la mise à jour, désactivez puis réactivez DigiBoard** pour faire apparaître les nouvelles entrées de menu.
+
+## 🛠️ Pack améliorations
+
+* **Documents Digirisk multi-entités sous Dolibarr 24** : un document d'une autre entité ouvert depuis le tableau de bord renvoyait « Le fichier n'existe pas ». Il s'ouvre de nouveau.
+* **DigiBoard parle anglais** : le module dispose désormais d'une traduction anglaise complète.
+* **Partage Multicompany** : le bloc de partage des statistiques DigiRisk de la fiche entité affichait des codes techniques (`DIGIRISKSTATSSharing`) ; il est traduit.
+* **La bonne langue pour chacun** : les textes du module suivent la langue choisie par l'utilisateur, et non plus celle de son navigateur.
+
+## 👉 Essayez-la maintenant
+
+**Allez tester la liste simplifiée des risques sur la démo : [http://demo.digirisk.com/](http://demo.digirisk.com/)**
 
 ## Comparaison des versions [23.1.1](https://github.com/Evarisk/digiboard/compare/23.1.1...23.2.0) et 23.2.0
 
