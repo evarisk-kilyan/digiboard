@@ -41,6 +41,28 @@ if (!$user->rights->digiboard->read) {
     accessforbidden();
 }
 
+// A risk or a task of another entity only opens once the session is in that entity: the cards
+// send an object of another entity back to the module home. Multicompany switches through its
+// switchentity URL parameter, but its redirect doubles the path of an install in a subfolder
+$openId = GETPOSTINT('open_id');
+if (in_array(GETPOST('action', 'aZ09'), ['openrisk', 'opentask'], true) && $openId > 0) {
+    $openEntity = GETPOSTINT('open_entity');
+    if ($openEntity > 0 && $openEntity != $conf->entity && isModEnabled('multicompany') && is_object($mc)) {
+        if ($mc->switchEntity($openEntity) <= 0) {
+            setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
+    }
+
+    if (GETPOST('action', 'aZ09') == 'openrisk') {
+        header('Location: ' . dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $openId, 1));
+    } else {
+        header('Location: ' . DOL_URL_ROOT . '/projet/tasks/task.php?id=' . $openId . '&withproject=1');
+    }
+    exit;
+}
+
 $title   = $langs->transnoentities('SimplifiedRiskList');
 $helpUrl = 'FR:Module_' . $moduleName;
 
@@ -905,7 +927,8 @@ if (empty($risks)) {
 } else {
     foreach ($risks as $r) {
         $riskId = (int) $r->rowid;
-        $urlRiskCard = dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : ''), 1);
+        $isOtherEntity = !empty($r->entity) && $r->entity != $conf->entity;
+        $urlRiskCard   = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=openrisk&open_id=' . $riskId . '&open_entity=' . (int) $r->entity : dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId, 1);
         $riskEntityId   = (int) $r->entity;
         $riskEntityName = $entities[$riskEntityId] ?? ($riskEntityId > 0 ? $langs->trans('Entity') . ' ' . $riskEntityId : '');
 
@@ -1037,7 +1060,7 @@ if (empty($risks)) {
             foreach ($riskTasks as $tk) {
                 $taskProgress = isset($tk->progress) ? (int) $tk->progress : 0;
                 $isCompleted = $taskProgress >= 100;
-                $urlTask = DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1' . (!empty($r->entity) && $r->entity != $conf->entity ? '&entity=' . (int) $r->entity : '');
+                $urlTask = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=opentask&open_id=' . (int) $tk->rowid . '&open_entity=' . (int) $r->entity : DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1';
                 $isOverdue = false;
                 if (!$isCompleted && !empty($tk->datee)) {
                     $dueDate = $db->jdate($tk->datee);
