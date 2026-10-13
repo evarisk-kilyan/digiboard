@@ -928,7 +928,7 @@ if (empty($risks)) {
     foreach ($risks as $r) {
         $riskId = (int) $r->rowid;
         $isOtherEntity = !empty($r->entity) && $r->entity != $conf->entity;
-        $urlRiskCard   = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=openrisk&open_id=' . $riskId . '&open_entity=' . (int) $r->entity : dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId, 1);
+        $urlRiskCard   = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=openrisk&token=' . newToken() . '&open_id=' . $riskId . '&open_entity=' . (int) $r->entity : dol_buildpath('/digiriskdolibarr/view/risk/risk_card.php?id=' . $riskId, 1);
         $riskEntityId   = (int) $r->entity;
         $riskEntityName = $entities[$riskEntityId] ?? ($riskEntityId > 0 ? $langs->trans('Entity') . ' ' . $riskEntityId : '');
 
@@ -1060,7 +1060,7 @@ if (empty($risks)) {
             foreach ($riskTasks as $tk) {
                 $taskProgress = isset($tk->progress) ? (int) $tk->progress : 0;
                 $isCompleted = $taskProgress >= 100;
-                $urlTask = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=opentask&open_id=' . (int) $tk->rowid . '&open_entity=' . (int) $r->entity : DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1';
+                $urlTask = $isOtherEntity ? $_SERVER['PHP_SELF'] . '?action=opentask&token=' . newToken() . '&open_id=' . (int) $tk->rowid . '&open_entity=' . (int) $r->entity : DOL_URL_ROOT . '/projet/tasks/task.php?id=' . (int) $tk->rowid . '&withproject=1';
                 $isOverdue = false;
                 if (!$isCompleted && !empty($tk->datee)) {
                     $dueDate = $db->jdate($tk->datee);
