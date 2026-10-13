@@ -66,10 +66,9 @@ if (in_array(GETPOST('action', 'aZ09'), ['openrisk', 'opentask'], true) && $open
 $title   = $langs->transnoentities('SimplifiedRiskList');
 $helpUrl = 'FR:Module_' . $moduleName;
 
-saturne_header(0, '', $title, $helpUrl);
-
 // Check if Digirisk module is enabled
 if (empty($conf->digiriskdolibarr->enabled)) {
+    saturne_header(0, '', $title, $helpUrl);
     print load_fiche_titre($title, '', 'fa-exclamation-triangle');
     print '<div class="warning paddingtopbottom">' . $langs->trans('ModuleDigiriskDolibarrRequired') . '</div>';
     llxFooter();
@@ -99,9 +98,36 @@ $limit     = GETPOSTINT('limit') > 0 ? GETPOSTINT('limit') : $conf->liste_limit;
 if (empty($sortfield)) {
     $sortfield = 'cotation';
 }
-if (empty($sortorder)) {
-    $sortorder = 'DESC';
-}
+// The sort order goes as is into the ORDER BY clause
+$sortorder = strtoupper($sortorder) === 'ASC' ? 'ASC' : 'DESC';
+
+// Highest cotation of each risk level, as the Digirisk scale (getEvaluationScale) splits it
+$cotationLevelMax = [
+    'low'          => 47,
+    'plan'         => 50,
+    'treat'        => 79,
+    'unacceptable' => 100,
+];
+$riskLevelLabels = [
+    'none'         => 'RiskNotAssessed',
+    'low'          => 'RiskLow',
+    'plan'         => 'RiskToPlan',
+    'treat'        => 'RiskToTreat',
+    'unacceptable' => 'RiskUnacceptable',
+];
+
+// Risk level key of a cotation, 'none' when the risk was never assessed
+$getRiskLevel = function ($cotation) use ($cotationLevelMax) {
+    if ($cotation === null) {
+        return 'none';
+    }
+    foreach ($cotationLevelMax as $level => $max) {
+        if ($cotation <= $max) {
+            return $level;
+        }
+    }
+    return 'unacceptable';
+};
 
 // Retrieve accessible entities (establishments)
 $entities = [];
@@ -130,6 +156,59 @@ if (file_exists($dangerCategoriesFile)) {
         }
     }
 }
+
+// Protection means are the risk signs of the risk's element filed as personal (OBLIGATION) or collective
+// (epc) protective equipment, as the product risks of Digirisk pick their protections
+$protectionCategories = [];
+$signalisationFile    = DOL_DOCUMENT_ROOT . '/custom/digiriskdolibarr/js/json/signalisationCategories.json';
+if (file_exists($signalisationFile)) {
+    foreach ((array) json_decode((string) file_get_contents($signalisationFile), true) as $sign) {
+        if (preg_match('/^(OBLIGATION|epc)\//', $sign['name_thumbnail'] ?? '')) {
+            $protectionCategories[(int) $sign['position']] = $sign;
+        }
+    }
+}
+
+// Criteria of the advanced cotation method, from the grid Digirisk evaluates with. Its criteria come in
+// the order of the assessment columns: an environmental risk stores frequency, history, control and
+// environment into the exposition, occurrence, formation and protection columns
+$cotationCriteria  = [];
+$criteriaColumns   = ['gravite', 'exposition', 'occurrence', 'formation', 'protection'];
+$cotationGridFile  = DOL_DOCUMENT_ROOT . '/custom/digiriskdolibarr/js/json/default.json';
+if (file_exists($cotationGridFile)) {
+    $cotationGrid = json_decode((string) file_get_contents($cotationGridFile), true);
+    foreach ($cotationGrid[0]['option'][$riskType . '_variable'] ?? [] as $index => $variable) {
+        if (!isset($criteriaColumns[$index]) || empty($variable['name'])) {
+            continue;
+        }
+        // A level without threshold is one the criterion does not use
+        $levels = [];
+        foreach ($variable['option']['survey']['request'] ?? [] as $request) {
+            if (isset($request['seuil']) && $request['seuil'] !== '') {
+                $levels[(int) $request['seuil']] = (string) ($request['question'] ?? '');
+            }
+        }
+        $cotationCriteria[$criteriaColumns[$index]] = [
+            'label'    => 'Criterion' . $variable['name'],
+            'levels'   => $levels,
+            'maxLevel' => !empty($levels) ? max(array_keys($levels)) : 4,
+        ];
+    }
+}
+
+// Criteria values of the last assessment of a risk: only the advanced method rates criteria
+$getRiskCriteria = function ($risk) use ($cotationCriteria) {
+    $values = [];
+    if ($risk->ra_method === 'advanced') {
+        foreach ($cotationCriteria as $column => $criterion) {
+            $value = $risk->{'ra_' . $column};
+            if ($value !== null && $value !== '') {
+                $values[$column] = (int) $value;
+            }
+        }
+    }
+    return $values;
+};
 
 // Validate category_id
 if ($categoryId >= 0 && !isset($dangerCategories[$categoryId])) {
@@ -344,12 +423,14 @@ $sql  = "SELECT r.rowid, r.ref, r.description, r.category, r.status, r.type, r.e
 $sql .= " e.rowid as element_id, e.ref as element_ref, e.label as element_label, e.element_type,";
 $sql .= " p.rowid as parent_id, p.ref as parent_ref, p.label as parent_label,";
 $sql .= " ra.rowid as ra_id, ra.ref as ra_ref, ra.cotation, ra.date_riskassessment, ra.comment as ra_comment,";
+$sql .= " ra.method as ra_method, ra.gravite as ra_gravite, ra.exposition as ra_exposition, ra.occurrence as ra_occurrence, ra.formation as ra_formation, ra.protection as ra_protection,";
 $sql .= " u.rowid as ra_user_id, u.firstname as ra_user_firstname, u.lastname as ra_user_lastname";
 $sql .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_risk r";
 $sql .= " INNER JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement e ON e.rowid = r.fk_element";
 $sql .= " LEFT JOIN " . MAIN_DB_PREFIX . "digiriskdolibarr_digiriskelement p ON p.rowid = e.fk_parent";
 $sql .= " LEFT JOIN (";
-$sql .= "   SELECT ra1.rowid, ra1.fk_risk, ra1.ref, ra1.cotation, ra1.date_riskassessment, ra1.comment, ra1.fk_user_creat";
+$sql .= "   SELECT ra1.rowid, ra1.fk_risk, ra1.ref, ra1.cotation, ra1.date_riskassessment, ra1.comment, ra1.fk_user_creat,";
+$sql .= "   ra1.method, ra1.gravite, ra1.exposition, ra1.occurrence, ra1.formation, ra1.protection";
 $sql .= "   FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_riskassessment ra1";
 $sql .= "   INNER JOIN (";
 $sql .= "     SELECT fk_risk, MAX(rowid) as max_id";
@@ -412,6 +493,175 @@ if ($sortfield === 'ref') {
     $orderClause .= "CASE WHEN ra.cotation IS NULL THEN -1 ELSE ra.cotation END " . $sortorder . ", r.ref ASC";
 }
 
+// Fetch the action plan tasks of the given risks in batch, grouped by risk
+$fetchTasksByRisk = function (array $riskIds) use ($db) {
+    $tasksByRisk = [];
+    foreach (array_chunk($riskIds, 500) as $chunkIds) {
+        $sqlTasks  = "SELECT t.rowid, t.ref, t.label, t.progress, t.dateo, t.datee, te.fk_risk,";
+        $sqlTasks .= " u.rowid as user_id, u.firstname, u.lastname";
+        $sqlTasks .= " FROM " . MAIN_DB_PREFIX . "projet_task t";
+        $sqlTasks .= " JOIN " . MAIN_DB_PREFIX . "projet_task_extrafields te ON te.fk_object = t.rowid";
+        $sqlTasks .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = t.fk_user_creat";
+        $sqlTasks .= " WHERE te.fk_risk IN (" . implode(',', array_map('intval', $chunkIds)) . ")";
+        $sqlTasks .= " ORDER BY t.rowid ASC";
+
+        $resTasks = $db->query($sqlTasks);
+        if ($resTasks) {
+            while ($t = $db->fetch_object($resTasks)) {
+                $tasksByRisk[(int) $t->fk_risk][] = $t;
+            }
+            $db->free($resTasks);
+        }
+    }
+    return $tasksByRisk;
+};
+
+// Fetch the protection means of the given groupments and work units in batch, grouped by element
+$fetchProtectionsByElement = function (array $elementIds) use ($db, $protectionCategories) {
+    $protectionsByElement = [];
+    if (empty($protectionCategories)) {
+        return $protectionsByElement;
+    }
+    foreach (array_chunk(array_unique($elementIds), 500) as $chunkIds) {
+        $sqlSigns  = "SELECT rs.fk_element, rs.category, rs.description";
+        $sqlSigns .= " FROM " . MAIN_DB_PREFIX . "digiriskdolibarr_risksign rs";
+        $sqlSigns .= " WHERE rs.status = 1 AND rs.fk_element IN (" . implode(',', array_map('intval', $chunkIds)) . ")";
+        $sqlSigns .= " AND rs.category IN (" . implode(',', array_keys($protectionCategories)) . ")";
+        $sqlSigns .= " ORDER BY rs.category ASC, rs.rowid ASC";
+
+        $resSigns = $db->query($sqlSigns);
+        if ($resSigns) {
+            while ($sign = $db->fetch_object($resSigns)) {
+                $protectionsByElement[(int) $sign->fk_element][] = $sign;
+            }
+            $db->free($resSigns);
+        }
+    }
+    return $protectionsByElement;
+};
+
+// Label of a protection mean on a single line: the name of its sign, then what the risk sign says about it
+$getProtectionLabel = function ($protection) use ($protectionCategories) {
+    $description = trim((string) preg_replace('/\s*\R\s*/', ' ', (string) $protection->description));
+    return $protectionCategories[(int) $protection->category]['name'] . ($description !== '' ? ' : ' . $description : '');
+};
+
+// CSV export of the whole filtered list (no pagination), one line per risk carrying its whole action plan
+if ($action == 'export_csv') {
+    $resExport = $db->query($sql . $orderClause);
+    if (!$resExport) {
+        dol_print_error($db);
+        exit;
+    }
+    $exportRisks = [];
+    while ($obj = $db->fetch_object($resExport)) {
+        $exportRisks[(int) $obj->rowid] = $obj;
+    }
+    $db->free($resExport);
+    $exportTasks       = $fetchTasksByRisk(array_keys($exportRisks));
+    $exportProtections = $fetchProtectionsByElement(array_map(function ($risk) {
+        return (int) $risk->element_id;
+    }, array_values($exportRisks)));
+
+    // Every cell is enclosed, and a text starting like a formula is neutralized for spreadsheet software
+    $separator = getDolGlobalString('EXPORT_CSV_SEPARATOR_TO_USE', ';');
+    $csvLine   = function (array $cells) use ($separator) {
+        foreach ($cells as $key => $cell) {
+            $cell = (string) $cell;
+            if (preg_match('/^[=+\-@\t\r]/', $cell)) {
+                $cell = "'" . $cell;
+            }
+            $cells[$key] = '"' . str_replace('"', '""', $cell) . '"';
+        }
+        return implode($separator, $cells) . "\r\n";
+    };
+
+    $csvHeader = [
+        $langs->transnoentities('Establishment'),
+        $langs->transnoentities('Groupment'),
+        $langs->transnoentities('WorkUnit'),
+        $langs->transnoentities('RiskRef'),
+        $langs->transnoentities('DangerCategory'),
+        $langs->transnoentities('Description'),
+        $langs->transnoentities('RiskCotation'),
+        $langs->transnoentities('RiskLevel'),
+    ];
+    foreach ($cotationCriteria as $criterion) {
+        $csvHeader[] = $langs->transnoentities($criterion['label']);
+    }
+    $csvHeader[] = $langs->transnoentities('AssessmentDate');
+    $csvHeader[] = $langs->transnoentities('Evaluator');
+    $csvHeader[] = $langs->transnoentities('AssessmentComment');
+    $csvHeader[] = $langs->transnoentities('ProtectionMeans');
+    $csvHeader[] = $langs->transnoentities('ActionsCount');
+    $csvHeader[] = $langs->transnoentities('ActionsCompletedCount');
+    $csvHeader[] = $langs->transnoentities('ActionsAndTasks');
+    $csv = $csvLine($csvHeader);
+
+    $now = dol_now();
+    foreach ($exportRisks as $riskId => $r) {
+        $cotationVal = isset($r->cotation) ? (int) $r->cotation : null;
+        // A risk sits either on a work unit (under its groupment) or directly on a groupment
+        $isWorkUnit = $r->element_type === 'workunit';
+        $cells      = [
+            $entities[(int) $r->entity] ?? '',
+            $isWorkUnit ? (!empty($r->parent_id) ? $r->parent_ref . ' - ' . $r->parent_label : '') : $r->element_ref . ' - ' . $r->element_label,
+            $isWorkUnit ? $r->element_ref . ' - ' . $r->element_label : '',
+            $r->ref,
+            $dangerCategories[(int) $r->category]['name'] ?? '',
+            $r->description,
+            $cotationVal ?? '',
+            $langs->transnoentities($riskLevelLabels[$getRiskLevel($cotationVal)]),
+        ];
+        $riskCriteria = $getRiskCriteria($r);
+        foreach ($cotationCriteria as $column => $criterion) {
+            $cells[] = $riskCriteria[$column] ?? '';
+        }
+        $cells[] = !empty($r->date_riskassessment) ? dol_print_date($db->jdate($r->date_riskassessment), 'day') : '';
+        $cells[] = trim($r->ra_user_firstname . ' ' . $r->ra_user_lastname);
+        $cells[] = $r->ra_comment;
+
+        // Protection means and action plan each fit in one cell, one item per line
+        $protectionLines = [];
+        foreach ($exportProtections[(int) $r->element_id] ?? [] as $protection) {
+            $protectionLines[] = $getProtectionLabel($protection);
+        }
+        $cells[] = implode("\n", $protectionLines);
+
+        $riskTasks = $exportTasks[$riskId] ?? [];
+        $nbDone    = 0;
+        $taskLines = [];
+        foreach ($riskTasks as $tk) {
+            $taskProgress = (int) $tk->progress;
+            $dueDate      = !empty($tk->datee) ? $db->jdate($tk->datee) : '';
+            if ($taskProgress >= 100) {
+                $nbDone++;
+            }
+            $details = [$taskProgress . ' %'];
+            if (!empty($dueDate)) {
+                $details[] = $langs->transnoentities('DateEnd') . ' ' . dol_print_date($dueDate, 'day') . ($taskProgress < 100 && $dueDate < $now ? ' - ' . $langs->transnoentities('Overdue') : '');
+            }
+            if (!empty($tk->firstname) || !empty($tk->lastname)) {
+                $details[] = trim($tk->firstname . ' ' . $tk->lastname);
+            }
+            $taskLines[] = $tk->ref . ' - ' . $tk->label . ' (' . implode(', ', $details) . ')';
+        }
+        $cells[] = count($riskTasks);
+        $cells[] = $nbDone;
+        $cells[] = implode("\n", $taskLines);
+
+        $csv .= $csvLine($cells);
+    }
+
+    $fileName = str_replace(' ', '_', dol_sanitizeFileName($langs->transnoentities($riskType === 'riskenvironmental' ? 'RiskTypeEnvironmental' : 'RiskTypeProfessional')));
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $fileName . '_' . dol_print_date($now, 'dayhourlog') . '.csv"');
+    // UTF-8 BOM, so that spreadsheet software reads the accents
+    print "\xEF\xBB\xBF" . $csv;
+    $db->close();
+    exit;
+}
+
 // Count Total Matching Rows
 $posFrom   = strpos($sql, ' FROM ');
 $sqlTotal  = "SELECT COUNT(r.rowid) as total" . ($posFrom !== false ? substr($sql, $posFrom) : '');
@@ -437,24 +687,14 @@ if ($res) {
 }
 
 // Fetch Tasks for the retrieved risks in batch
-$tasksByRisk = [];
-if (!empty($riskIds)) {
-    $sqlTasks  = "SELECT t.rowid, t.ref, t.label, t.progress, t.datee, te.fk_risk,";
-    $sqlTasks .= " u.rowid as user_id, u.firstname, u.lastname";
-    $sqlTasks .= " FROM " . MAIN_DB_PREFIX . "projet_task t";
-    $sqlTasks .= " JOIN " . MAIN_DB_PREFIX . "projet_task_extrafields te ON te.fk_object = t.rowid";
-    $sqlTasks .= " LEFT JOIN " . MAIN_DB_PREFIX . "user u ON u.rowid = t.fk_user_creat";
-    $sqlTasks .= " WHERE te.fk_risk IN (" . implode(',', $riskIds) . ")";
-    $sqlTasks .= " ORDER BY t.rowid ASC";
+$tasksByRisk = $fetchTasksByRisk($riskIds);
 
-    $resTasks = $db->query($sqlTasks);
-    if ($resTasks) {
-        while ($t = $db->fetch_object($resTasks)) {
-            $tasksByRisk[(int) $t->fk_risk][] = $t;
-        }
-        $db->free($resTasks);
-    }
-}
+// Fetch Protection Means of the elements of the retrieved risks
+$protectionsByElement = $fetchProtectionsByElement(array_map(function ($risk) {
+    return (int) $risk->element_id;
+}, $risks));
+
+saturne_header(0, '', $title, $helpUrl);
 
 // Notion-Style CSS
 print '<style>
@@ -703,7 +943,61 @@ print '<style>
 .status-unacceptable { background: #111827; color: #ffffff !important; }
 .status-none { background: #f1f5f9; color: #64748b; }
 
+/* Advanced Cotation Criteria */
+.notion-criteria {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #4b5563;
+}
+.notion-criterion {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.notion-criterion-label {
+    min-width: 74px;
+}
+.notion-criterion-gauge {
+    display: inline-flex;
+    gap: 2px;
+}
+.notion-criterion-gauge span {
+    width: 10px;
+    height: 6px;
+    border-radius: 2px;
+    background-color: #e5e7eb;
+}
+.notion-criterion-gauge span.on {
+    background-color: #64748b;
+}
+.notion-criterion-value {
+    font-weight: 700;
+    color: #1f2937;
+}
+
 /* Checklist Task Styling */
+/* Protection Means */
+.notion-protection-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 128px;
+}
+.notion-protection-picto {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: contain;
+}
+.notion-empty-text {
+    font-size: 12px;
+    color: #9ca3af;
+    font-style: italic;
+}
+
 .notion-task-list {
     display: flex;
     flex-direction: column;
@@ -813,21 +1107,11 @@ print '<div class="notion-metrics-bar">';
 print '<a href="' . $baseUrl . '&cotation_filter=all" class="notion-metric-pill metric-all' . ($cotationFilter === 'all' ? ' active' : '') . '">';
 print '<span class="notion-metric-count">' . $counts['all'] . '</span> ' . $langs->trans('AllRisks') . '</a>';
 
-// Low (< 48)
-print '<a href="' . $baseUrl . '&cotation_filter=low" class="notion-metric-pill metric-low' . ($cotationFilter === 'low' ? ' active' : '') . '">';
-print '<span class="notion-metric-count">' . $counts['low'] . '</span> ' . $langs->trans('RiskLow') . '</a>';
-
-// Plan (48-50)
-print '<a href="' . $baseUrl . '&cotation_filter=plan" class="notion-metric-pill metric-plan' . ($cotationFilter === 'plan' ? ' active' : '') . '">';
-print '<span class="notion-metric-count">' . $counts['plan'] . '</span> ' . $langs->trans('RiskToPlan') . '</a>';
-
-// Treat (51-79)
-print '<a href="' . $baseUrl . '&cotation_filter=treat" class="notion-metric-pill metric-treat' . ($cotationFilter === 'treat' ? ' active' : '') . '">';
-print '<span class="notion-metric-count">' . $counts['treat'] . '</span> ' . $langs->trans('RiskToTreat') . '</a>';
-
-// Unacceptable (>= 80)
-print '<a href="' . $baseUrl . '&cotation_filter=unacceptable" class="notion-metric-pill metric-unacceptable' . ($cotationFilter === 'unacceptable' ? ' active' : '') . '">';
-print '<span class="notion-metric-count">' . $counts['unacceptable'] . '</span> ' . $langs->trans('RiskUnacceptable') . '</a>';
+// The four cotation levels
+foreach (array_keys($cotationLevelMax) as $level) {
+    print '<a href="' . $baseUrl . '&cotation_filter=' . $level . '" class="notion-metric-pill metric-' . $level . ($cotationFilter === $level ? ' active' : '') . '">';
+    print '<span class="notion-metric-count">' . $counts[$level] . '</span> ' . $langs->trans($riskLevelLabels[$level]) . '</a>';
+}
 
 // None (Unassessed) - Only shown if there are unassessed risks or currently filtered on it
 if ($counts['none'] > 0 || $cotationFilter === 'none') {
@@ -903,7 +1187,9 @@ print '</form>';
 
 // Standard Dolibarr List Barre (Pagination & Counts)
 $param = '&risk_type=' . urlencode($riskType) . '&cotation_filter=' . urlencode($cotationFilter) . ($filterEntity > 0 ? '&filter_entity=' . $filterEntity : '') . ($elementId > 0 ? '&element_id=' . $elementId : '') . ($categoryId >= 0 ? '&category_id=' . $categoryId : '') . (!empty($search) ? '&search=' . urlencode($search) : '');
-print_barre_liste('', $page, $_SERVER['PHP_SELF'], $param, $sortfield, $sortorder, '', count($risks), $totalRows, 'fa-exclamation-triangle', 0, '', '', $limit, 0, 0, 1);
+$exportUrl     = $_SERVER['PHP_SELF'] . '?action=export_csv&token=' . newToken() . $param . '&sortfield=' . urlencode($sortfield) . '&sortorder=' . urlencode($sortorder);
+$morehtmlright = dolGetButtonTitle($langs->trans('ExportCSV'), $langs->trans('ExportRiskListCSVHelp'), 'fa fa-file-csv', $exportUrl);
+print_barre_liste('', $page, $_SERVER['PHP_SELF'], $param, $sortfield, $sortorder, '', count($risks), $totalRows, 'fa-exclamation-triangle', 0, $morehtmlright, '', $limit, 0, 0, 1);
 
 // Notion Table
 print '<div class="notion-table-card">';
@@ -917,13 +1203,14 @@ print_liste_field_titre('Description', $_SERVER['PHP_SELF'], 'description', '', 
 print_liste_field_titre($langs->trans('Establishment'), $_SERVER['PHP_SELF'], 'entity', '', $param, '', $sortfield, $sortorder);
 print_liste_field_titre($langs->trans('GroupmentAndUnit'), $_SERVER['PHP_SELF'], 'element', '', $param, '', $sortfield, $sortorder);
 print_liste_field_titre($langs->trans('RiskLevel'), $_SERVER['PHP_SELF'], 'cotation', '', $param, '', $sortfield, $sortorder);
+print '<th class="nowraponall"><i class="fas fa-hard-hat"></i> ' . $langs->trans('ProtectionMeans') . '</th>';
 print '<th><i class="fas fa-tasks"></i> ' . $langs->trans('ActionsAndTasks') . '</th>';
 print '<th class="center" style="width: 100px;">' . $langs->trans('Action') . '</th>';
 print '</tr></thead>';
 
 print '<tbody>';
 if (empty($risks)) {
-    print '<tr><td colspan="8" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
+    print '<tr><td colspan="9" class="center opacitymedium paddingtopbottom">' . $langs->trans('NoRecordFound') . '</td></tr>';
 } else {
     foreach ($risks as $r) {
         $riskId = (int) $r->rowid;
@@ -946,22 +1233,9 @@ if (empty($risks)) {
 
         // Cotation Badge Info
         $cotationVal = isset($r->cotation) ? (int) $r->cotation : null;
-        if ($cotationVal === null) {
-            $statusClass = 'status-none';
-            $statusLabel = $langs->trans('RiskNotAssessed');
-        } elseif ($cotationVal < 48) {
-            $statusClass = 'status-low';
-            $statusLabel = $langs->trans('RiskLow') . ' (' . $cotationVal . ')';
-        } elseif ($cotationVal < 51) {
-            $statusClass = 'status-plan';
-            $statusLabel = $langs->trans('RiskToPlan') . ' (' . $cotationVal . ')';
-        } elseif ($cotationVal < 80) {
-            $statusClass = 'status-treat';
-            $statusLabel = $langs->trans('RiskToTreat') . ' (' . $cotationVal . ')';
-        } else {
-            $statusClass = 'status-unacceptable';
-            $statusLabel = $langs->trans('RiskUnacceptable') . ' (' . $cotationVal . ')';
-        }
+        $riskLevel   = $getRiskLevel($cotationVal);
+        $statusClass = 'status-' . $riskLevel;
+        $statusLabel = $langs->trans($riskLevelLabels[$riskLevel]) . ($cotationVal !== null ? ' (' . $cotationVal . ')' : '');
 
         print '<tr>';
 
@@ -1017,6 +1291,24 @@ if (empty($risks)) {
         print '<div class="notion-status-pill ' . $statusClass . '">';
         print dol_escape_htmltag($statusLabel);
         print '</div>';
+        $riskCriteria = $getRiskCriteria($r);
+        if (!empty($riskCriteria)) {
+            print '<div class="notion-criteria">';
+            foreach ($riskCriteria as $column => $criterionVal) {
+                $criterion = $cotationCriteria[$column];
+                $levelText = $criterion['levels'][$criterionVal] ?? '';
+                print '<div class="notion-criterion" title="' . dol_escape_htmltag($langs->transnoentities($criterion['label']) . ' : ' . $criterionVal . ($levelText !== '' ? ' - ' . $levelText : '')) . '">';
+                print '<span class="notion-criterion-label">' . $langs->trans($criterion['label']) . '</span>';
+                print '<span class="notion-criterion-gauge">';
+                for ($step = 1; $step <= $criterion['maxLevel']; $step++) {
+                    print '<span' . ($step <= $criterionVal ? ' class="on"' : '') . '></span>';
+                }
+                print '</span>';
+                print '<span class="notion-criterion-value">' . $criterionVal . '</span>';
+                print '</div>';
+            }
+            print '</div>';
+        }
         if ($cotationVal !== null) {
             print '<div style="font-size: 11px; color: #6b7280; margin-top: 5px;">';
             if (!empty($r->ra_user_firstname) || !empty($r->ra_user_lastname)) {
@@ -1032,6 +1324,21 @@ if (empty($risks)) {
                 print '&laquo; ' . dol_trunc(dol_escape_htmltag($r->ra_comment), 60) . ' &raquo;';
                 print '</div>';
             }
+        }
+        print '</td>';
+
+        // Column: Protection Means of the risk's groupment or work unit
+        $elementProtections = $protectionsByElement[(int) $r->element_id] ?? [];
+        print '<td>';
+        if (empty($elementProtections)) {
+            print '<span class="notion-empty-text">' . $langs->trans('NoProtectionMeans') . '</span>';
+        } else {
+            print '<div class="notion-protection-list">';
+            foreach ($elementProtections as $protection) {
+                $protectionSign = $protectionCategories[(int) $protection->category];
+                print '<img src="' . dol_buildpath('/custom/digiriskdolibarr/img/' . $protectionSign['name_thumbnail'], 1) . '" class="notion-protection-picto" alt="' . dol_escape_htmltag($protectionSign['name']) . '" title="' . dol_escape_htmltag($getProtectionLabel($protection)) . '" loading="lazy">';
+            }
+            print '</div>';
         }
         print '</td>';
 
