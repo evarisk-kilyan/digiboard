@@ -267,6 +267,27 @@ if ($resElements) {
     $db->free($resElements);
 }
 
+// Putting a groupment in the bin only marks that groupment: its units keep their own status. An
+// element is only shown when its whole chain of parents is active, the way the Digirisk tree does,
+// so walk down from the roots and leave out what hangs under a binned or archived element
+$reachableElements = [];
+$queue             = $elementsByParent[0] ?? [];
+while (!empty($queue)) {
+    $curr = (int) array_shift($queue);
+    if (isset($reachableElements[$curr])) {
+        continue;
+    }
+    $reachableElements[$curr] = true;
+    foreach ($elementsByParent[$curr] ?? [] as $childId) {
+        $queue[] = (int) $childId;
+    }
+}
+
+$hiddenElementIds = array_keys(array_diff_key($elements, $reachableElements));
+foreach ($hiddenElementIds as $hiddenElementId) {
+    unset($elements[$hiddenElementId], $groupments[$hiddenElementId], $elementsByParent[$hiddenElementId]);
+}
+
 // If an element was selected but belongs to another entity when an entity filter is set, reset it
 if ($filterEntity > 0 && $elementId > 0 && isset($elements[$elementId]) && (int) $elements[$elementId]->entity !== $filterEntity) {
     $elementId = 0;
@@ -397,6 +418,9 @@ if ($filterEntity > 0) {
 if (!empty($filterElementIds)) {
     $sqlCounts .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
 }
+if (!empty($hiddenElementIds)) {
+    $sqlCounts .= " AND r.fk_element NOT IN (" . implode(',', array_map('intval', $hiddenElementIds)) . ")";
+}
 if ($categoryId >= 0) {
     $sqlCounts .= " AND r.category = " . (int) $categoryId;
 }
@@ -450,6 +474,9 @@ if ($filterEntity > 0) {
 
 if (!empty($filterElementIds)) {
     $sql .= " AND r.fk_element IN (" . implode(',', $filterElementIds) . ")";
+}
+if (!empty($hiddenElementIds)) {
+    $sql .= " AND r.fk_element NOT IN (" . implode(',', array_map('intval', $hiddenElementIds)) . ")";
 }
 
 if ($categoryId >= 0) {
