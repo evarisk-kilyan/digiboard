@@ -818,7 +818,7 @@ print '<style>
 
 .metric-unacceptable, .metric-unacceptable:link, .metric-unacceptable:visited { background-color: #111827; color: #ffffff !important; }
 .metric-unacceptable:hover { background-color: #1f2937; color: #ffffff !important; text-decoration: none; }
-.metric-unacceptable .notion-metric-count { background: #dc2626; color: #ffffff !important; }
+.metric-unacceptable .notion-metric-count { background: #ffffff; color: #111827 !important; }
 .metric-unacceptable.active { border-color: #ffffff; box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.4); }
 
 .metric-none, .metric-none:link, .metric-none:visited { background-color: #f8fafc; color: #64748b !important; border: 1px dashed #cbd5e1; }
